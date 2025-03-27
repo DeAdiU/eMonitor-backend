@@ -148,22 +148,6 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # settings.py
-# SENDGRID_API_KEY = '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'  # Replace with your API key
-# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'  # Optional, if using SMTP
-# EMAIL_HOST = 'smtp.sendgrid.net'
-# EMAIL_PORT = 587
-# EMAIL_USE_TLS = True
-# EMAIL_HOST_USER = 'apikey'  # Literal string 'apikey', not your email
-# EMAIL_HOST_PASSWORD = SENDGRID_API_KEY  # Use the API key here
-# DEFAULT_FROM_EMAIL = 'adityauttarwar69@gmail.com'  # Must match a verified sender
-# FRONTEND_URL = 'http://127.0.0.1:8000/'  # Your frontend URL
-
-# settings.py
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-# DEFAULT_FROM_EMAIL = 'adityauttarwar69@gmail.com'
-
-
-# settings.py
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
