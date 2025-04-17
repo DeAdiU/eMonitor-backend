@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'api',
     'rest_framework',
+    'corsheaders',
     'rest_framework_simplejwt',
 ]
 
@@ -60,8 +61,17 @@ SIMPLE_JWT = {
 
 # Replace 'api' with the name of your app if it's different
 AUTH_USER_MODEL = 'api.User'
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # Example frontend URL,
+]
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+CORS_ALLOW_HEADERS = ["*"]
+
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -158,4 +168,6 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'adityauttarwar69@gmail.com'  # Your Gmail address from the image
 EMAIL_HOST_PASSWORD = 'cftqhvrpmpcsjvta '  # The 16-character App Password (no spaces)
 DEFAULT_FROM_EMAIL = 'adityauttarwar69@gmail.com'
-FRONTEND_URL = 'http://localhost:8000/api'
+FRONTEND_URL = 'http://127.0.0.1:8000/api'
+
+GOOGLE_API_KEY = "AIzaSyAYjACuvYcuU_hAa0jI_VHhgX7uiGEcV3E"
