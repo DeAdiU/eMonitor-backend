@@ -3,6 +3,9 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.db.models import Q, UniqueConstraint # Import Q and UniqueConstraint
+from django.core.exceptions import ValidationError
+
 
 class User(AbstractUser):
     ROLES = (
@@ -116,50 +119,125 @@ class Assessment(models.Model):
 
 class Question(models.Model):
     assessment = models.ForeignKey(
-        Assessment,
+        'Assessment',
         on_delete=models.CASCADE,
         related_name='questions'
     )
-    # Store Codeforces specific identifiers
-    contest_id = models.IntegerField(help_text="Codeforces Contest ID (e.g., 1998)")
-    problem_index = models.CharField(max_length=10, help_text="Codeforces Problem Index (e.g., 'B', 'A1')")
+    PLATFORM_CHOICES = (
+        ('codeforces', 'Codeforces'),
+        ('codechef', 'CodeChef'),
+        # Add other platforms here if needed
+    )
+    platform = models.CharField(
+        max_length=20,
+        choices=PLATFORM_CHOICES,
+        default='codeforces', # Set a default if desired
+        help_text="The platform hosting this question."
+    )
+    # Store Codeforces-specific identifiers, nullable for CodeChef
+    contest_id = models.IntegerField(
+        null=True,
+        blank=True, # Allow blank for non-Codeforces platforms
+        help_text="Codeforces Contest ID (e.g., 1998). Leave blank for CodeChef."
+    )
+    problem_index = models.CharField(
+        max_length=10, # Keep reasonably short
+        help_text="Platform-specific Problem Index/Code (e.g., 'B', 'A1', 'START01')."
+    )
 
-    # Optional: Store fetched metadata for display/filtering
-    title = models.CharField(max_length=255, blank=True, null=True, help_text="Problem title (fetched from Codeforces)")
-    link = models.URLField(max_length=500, blank=True, null=True, help_text="Direct link (auto-generated or fetched)")
-    tags = models.CharField(max_length=500, blank=True, null=True, help_text="Comma-separated tags (fetched)")
-    rating = models.IntegerField(null=True, blank=True, help_text="Problem rating (fetched)")
+    # Optional metadata (remains the same)
+    title = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Problem title (fetched from platform)"
+    )
+    link = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Direct link (auto-generated or fetched)"
+    )
+    tags = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Comma-separated tags (fetched)"
+    )
+    rating = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Problem rating (fetched)"
+    )
 
-    points = models.PositiveIntegerField(default=100, help_text="Points awarded for a correct solution")
-    # Optional: Add question-specific evaluation criteria override
-    # evaluation_criteria_override = models.TextField(blank=True, null=True, help_text="Specific AI evaluation criteria for this question.")
+    points = models.PositiveIntegerField(
+        default=100,
+        help_text="Points awarded for a correct solution"
+    )
 
-    class Meta:
-        ordering = ['assessment', 'id'] # Order by assessment, then creation order
-        # Ensure unique problem within an assessment
-        unique_together = ('assessment', 'contest_id', 'problem_index')
-        verbose_name = "Assessment Question"
-        verbose_name_plural = "Assessment Questions"
-
-    def __str__(self):
-        display_title = self.title if self.title else f"{self.contest_id}{self.problem_index}"
-        return f"{display_title} (Assessment: {self.assessment.title})"
+    def clean(self):
+        """Add basic platform-specific validation."""
+        super().clean() # Call parent clean method
+        if self.platform == 'codeforces':
+            # Ensure contest_id is provided for Codeforces
+            if self.contest_id is None:
+                raise ValidationError({'contest_id': "Contest ID is required for Codeforces questions."})
+        elif self.platform == 'codechef':
+            # Optionally ensure contest_id is *not* provided for CodeChef
+            if self.contest_id is not None:
+                 # Decide: raise error or just nullify it? Nullifying might be friendlier.
+                 # raise ValidationError({'contest_id': "Contest ID should be blank for CodeChef questions."})
+                 self.contest_id = None # Silently correct it
 
     def save(self, *args, **kwargs):
-        # Auto-generate link if contest_id and index are present
-        if self.contest_id and self.problem_index and not self.link:
-            # Determine if it's a gym contest or regular contest based on ID range (approximation)
-            if self.contest_id >= 100000: # Gym contests usually have high IDs
-                 self.link = f"https://codeforces.com/gym/{self.contest_id}/problem/{self.problem_index}"
-            else:
-                 self.link = f"https://codeforces.com/problemset/problem/{self.contest_id}/{self.problem_index}"
-                 # Or use /contest/ if it's specifically from a contest context:
-                 # self.link = f"https://codeforces.com/contest/{self.contest_id}/problem/{self.problem_index}"
-        super().save(*args, **kwargs)
+        """Auto-generate link based on platform if not already set."""
+        # Run clean() before saving if desired (optional, depends on workflow)
+        # self.full_clean() # Uncomment if you want validation on every save
+        if not self.link: # Only generate if link is not manually set
+            if self.platform == 'codeforces' and self.contest_id and self.problem_index:
+                # Codeforces link generation
+                contest_id_str = str(self.contest_id)
+                # Check if it looks like a gym contest ID (typically >= 100000)
+                if len(contest_id_str) >= 6 and contest_id_str.startswith('10'): # Simple heuristic for gym
+                     self.link = f"https://codeforces.com/gym/{self.contest_id}/problem/{self.problem_index.upper()}"
+                else: # Regular contest
+                     self.link = f"https://codeforces.com/problemset/problem/{self.contest_id}/{self.problem_index.upper()}"
+            elif self.platform == 'codechef' and self.problem_index:
+                # CodeChef link generation (uses problem code directly)
+                # Example: https://www.codechef.com/problems/FLOW001
+                # Example: https://www.codechef.com/submit/START120A (for contest problems during contest)
+                # Using the general /problems/ link is usually safer for persistence
+                self.link = f"https://www.codechef.com/problems/{self.problem_index.upper()}"
+            # Add elif blocks for other platforms if needed
 
-    # TODO: Add a method/signal to fetch title, tags, rating from Codeforces API upon creation/saving
-    # def fetch_codeforces_metadata(self): ...
+        super().save(*args, **kwargs) # Call the "real" save() method.
 
+    class Meta:
+        ordering = ['assessment', 'id']
+        verbose_name = "Assessment Question"
+        verbose_name_plural = "Assessment Questions"
+        constraints = [
+            # Unique constraint for Codeforces: (assessment, platform, contest_id, problem_index)
+            UniqueConstraint(
+                fields=['assessment', 'platform', 'contest_id', 'problem_index'],
+                condition=Q(platform='codeforces'), # Apply only when platform is 'codeforces'
+                name='unique_assessment_codeforces_question'
+            ),
+            # Unique constraint for CodeChef: (assessment, platform, problem_index)
+            # contest_id should be NULL for CodeChef, so it won't conflict with the CF constraint
+            UniqueConstraint(
+                fields=['assessment', 'platform', 'problem_index'],
+                condition=Q(platform='codechef'), # Apply only when platform is 'codechef'
+                name='unique_assessment_codechef_question'
+            ),
+            # Add constraints for other platforms if needed
+        ]
+
+    def __str__(self):
+        platform_name = self.get_platform_display()
+        identifier = f"{self.contest_id}{self.problem_index}" if self.platform == 'codeforces' else self.problem_index
+        display_title = self.title if self.title else f"Problem {identifier}"
+        return f"{display_title} ({platform_name}, Assessment: {self.assessment.title})"
 
 class AssessmentSubmission(models.Model):
     """

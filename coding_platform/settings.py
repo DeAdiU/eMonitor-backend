@@ -171,3 +171,10 @@ DEFAULT_FROM_EMAIL = 'adityauttarwar69@gmail.com'
 FRONTEND_URL = 'http://127.0.0.1:8000/api'
 
 GOOGLE_API_KEY = "AIzaSyAYjACuvYcuU_hAa0jI_VHhgX7uiGEcV3E"
+
+
+ALLOWED_HOSTS = ['*']  # or use your Railway domain later
+
+# Static files (important!)
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_URL = '/static/'

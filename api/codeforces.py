@@ -402,7 +402,7 @@ def find_problems_by_criteria(
 
 logger = logging.getLogger(__name__)
 
-def fetch_problem_metadata(contest_id: int, problem_index: str) -> dict | None:
+def fetch_problem_metadata_cf(contest_id: int, problem_index: str) -> dict | None:
     """
     Fetches metadata (title, tags, rating) for a specific Codeforces problem.
 

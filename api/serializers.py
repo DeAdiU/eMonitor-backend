@@ -8,6 +8,7 @@ from django.conf import settings
 import logging
 from .models import *
 from .permissions import *
+from django.db import IntegrityError
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -209,25 +210,57 @@ class MentorStudentMappingSerializer(serializers.ModelSerializer):
         model = MentorStudentMapping
         fields = ['id', 'mentor', 'student']
 
+
 class QuestionSerializer(serializers.ModelSerializer):
     assessment_title = serializers.CharField(source='assessment.title', read_only=True)
+    # Display platform name instead of code
+    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+
     class Meta:
         model = Question
         fields = (
-            'id', 'assessment', 'assessment_title', 'contest_id', 'problem_index',
+            'id', 'assessment', 'assessment_title',
+            'platform',         # Add platform (writable)
+            'platform_display', # Add platform display name (read-only)
+            'contest_id',       # Keep contest_id (conditionally required)
+            'problem_index',    # Keep problem_index (required)
             'title', 'link', 'tags', 'rating', 'points',
-            # 'evaluation_criteria_override' # Include if using this field
         )
-        read_only_fields = ('assessment', 'assessment_title', 'title', 'link', 'tags', 'rating') # Fetched/derived fields
+        read_only_fields = (
+            'id', 'assessment', 'assessment_title', 'platform_display',
+            'title', 'link', 'tags', 'rating' # Metadata and links are fetched/generated
+        )
+        extra_kwargs = {
+            # Although model has blank=True, explicitly state it's not always required here
+            'contest_id': {'required': False, 'allow_null': True},
+            # Points should be writable on creation/update
+            'points': {'required': False} # Use model default if not provided
+        }
 
-    # Optional: Add validation for contest_id/problem_index if needed
-    # def validate(self, data): ...
+    def validate(self, data):
+        """Ensure contest_id is provided if and only if platform is codeforces."""
+        platform = data.get('platform', getattr(self.instance, 'platform', None)) # Get platform from input or instance
+        contest_id = data.get('contest_id', getattr(self.instance, 'contest_id', None))
+
+        if platform == 'codeforces':
+            if contest_id is None:
+                raise serializers.ValidationError({'contest_id': 'Contest ID is required for Codeforces questions.'})
+        elif platform == 'codechef':
+            if contest_id is not None:
+                # You could raise an error, or just silently ignore/remove it before saving
+                # Raising an error is clearer for the API user.
+                raise serializers.ValidationError({'contest_id': 'Contest ID must be blank (null) for CodeChef questions.'})
+                # Or silently remove: data['contest_id'] = None
+        # Add validation for other platforms if needed
+
+        # Ensure problem_index is always provided (model field doesn't have blank=True)
+        if not data.get('problem_index', getattr(self.instance, 'problem_index', None)):
+             raise serializers.ValidationError({'problem_index': 'Problem Index/Code is required.'})
+
+
+        return data
 
 # serializers.py (in your app, e.g., 'assessments/serializers.py')
-
-from rest_framework import serializers
-from django.db.models import Count, Q, Prefetch # Import Prefetch
-from .models import Assessment, AssessmentSubmission, User
 
 class MentorAssignmentListSerializer(serializers.ModelSerializer):
     """
@@ -330,8 +363,9 @@ class AssessmentListSerializer(serializers.ModelSerializer):
 class AssessmentDetailSerializer(serializers.ModelSerializer):
     """Serializer for viewing/editing a single assessment"""
     mentor = BasicUserSerializer(read_only=True)
-    questions = QuestionSerializer(many=True, read_only=True) # Questions are managed separately
-    assigned_students = BasicUserSerializer(many=True, read_only=True) # Use IDs for assignment
+    # Use the updated QuestionSerializer
+    questions = QuestionSerializer(many=True, read_only=True)
+    assigned_students = BasicUserSerializer(many=True, read_only=True)
     assigned_student_ids = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='student'),
         many=True, write_only=True, source='assigned_students'
@@ -342,8 +376,7 @@ class AssessmentDetailSerializer(serializers.ModelSerializer):
         model = Assessment
         fields = (
             'id', 'mentor', 'title', 'description', 'deadline', 'created_at', 'updated_at', 'preferred_criteria',
-            'assigned_students', 'assigned_student_ids', 'questions', 'is_past_deadline', 
-            # 'evaluation_criteria_prompt' # Include if using this field
+            'assigned_students', 'assigned_student_ids', 'questions', 'is_past_deadline',
         )
         read_only_fields = ('mentor', 'created_at', 'updated_at', 'questions', 'is_past_deadline', 'assigned_students')
 

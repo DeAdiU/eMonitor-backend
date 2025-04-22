@@ -29,7 +29,7 @@ import datetime
 from django.db.models import Avg, Max, Min, Count, F, FloatField, Case, When, Q, Sum
 from django.db.models.functions import Cast
 from .codeforces_api import *
-
+from .codechef_questions import *
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
@@ -439,76 +439,99 @@ class AssessmentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(mentor=self.request.user)
 
-    # --- Custom Actions for Questions ---
-    
+
+
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsMentor, IsAssessmentMentorOwner])
     def add_question(self, request, pk=None):
-        """Add a question (by contest_id/index) to an assessment, fetching metadata."""
+        """
+        Add a question (by platform, contest_id/index) to an assessment, fetching metadata.
+        Requires 'platform', 'problem_index', and optionally 'contest_id' (for Codeforces).
+        Calls platform-specific metadata fetcher (API for CF, Selenium for CC).
+        """
         assessment = self.get_object()
         if assessment.is_past_deadline:
              return Response({"detail": "Cannot add questions after the deadline."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Use serializer primarily for input validation of contest_id, problem_index, points
-        input_serializer = QuestionSerializer(data=request.data, context={'request': request})
+        input_serializer = QuestionSerializer(data=request.data, context={'request': request, 'assessment': assessment})
         if not input_serializer.is_valid():
-            # Log the validation errors for debugging
             logger.warning(f"Add question validation failed for assessment {pk}: {input_serializer.errors}")
             return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Extract validated data
+        platform = input_serializer.validated_data['platform']
+        problem_index = input_serializer.validated_data['problem_index']
         contest_id = input_serializer.validated_data.get('contest_id')
-        problem_index = input_serializer.validated_data.get('problem_index')
-        # Get points from input, fallback to default if not provided or invalid in serializer
-        points = input_serializer.validated_data.get('points', 100)
+        points = input_serializer.validated_data.get('points', Question._meta.get_field('points').default)
 
-        # --- Prevent Duplicates ---
-        if Question.objects.filter(assessment=assessment, contest_id=contest_id, problem_index=problem_index).exists():
-            logger.info(f"Attempt to add duplicate question {contest_id}{problem_index} to assessment {assessment.id}")
-            return Response({"detail": "This problem already exists in the assessment."}, status=status.HTTP_400_BAD_REQUEST)
+        metadata = None
+        identifier = problem_index # Default identifier
 
-        # --- Fetch Metadata using the utility ---
-        # This call might be slow without caching!
-        metadata = fetch_problem_metadata(contest_id, problem_index)
+        try:
+            if platform == 'codeforces':
+                identifier = f"{contest_id}{problem_index}"
+                # --- Call Codeforces Fetcher (Assumed API based) ---
+                metadata = fetch_problem_metadata_cf(contest_id, problem_index)
+                # ---
+            elif platform == 'codechef':
+                identifier = problem_index
+                # --- Call CodeChef Selenium Scraper ---
+                metadata = fetch_problem_metadata_cc(problem_index)
+                # ---
+            else:
+                logger.warning(f"Metadata fetching not implemented for platform: {platform} on assessment {pk}")
+
+        except Exception as e:
+            # Catch errors during the metadata fetch process itself
+            logger.error(f"Error during metadata fetch call for {platform} problem {identifier} for assessment {pk}: {e}", exc_info=True)
+            # Proceeding without metadata: metadata remains None
 
         # --- Handle Metadata Fetch Result ---
         fetched_title = None
-        fetched_tags = None
+        fetched_tags_str = None # Store tags as comma-separated string
         fetched_rating = None
         if metadata is not None:
             fetched_title = metadata.get('title')
-            fetched_tags = metadata.get('tags')
+            fetched_tags_list = metadata.get('tags') # Expecting a list from both fetchers now
+            if isinstance(fetched_tags_list, list):
+                fetched_tags_str = ','.join(filter(None, fetched_tags_list))
+            elif isinstance(fetched_tags_list, str): # Handle if CF fetcher returns string
+                 fetched_tags_str = fetched_tags_list
             fetched_rating = metadata.get('rating')
         else:
-            # Metadata fetch failed or problem not found
-            # Decide behavior: Add without metadata or return error?
-            # Option 1: Add without metadata (log a warning)
-            logger.warning(f"Could not fetch metadata for {contest_id}{problem_index}. Adding question without title/tags/rating.")
-            # Option 2: Return an error (uncomment below to enable)
-            # return Response({"detail": f"Could not fetch metadata for problem {contest_id}{problem_index}. "
-            #                            f"Verify the Contest ID and Problem Index, or try again later."},
-            #                 status=status.HTTP_404_NOT_FOUND) # Or 503 if it was likely an API error
+            logger.warning(f"Could not fetch or process metadata for {platform} problem {identifier}. Adding question without title/tags/rating.")
 
         # --- Create and Save the Question ---
         try:
+            # Standardize case for problem index before saving
+            problem_index_upper = problem_index.upper()
             question = Question.objects.create(
                 assessment=assessment,
+                platform=platform,
                 contest_id=contest_id,
-                problem_index=problem_index,
+                problem_index=problem_index_upper, # Save standardized index
                 points=points,
-                title=fetched_title,  # Use fetched value or None
-                tags=fetched_tags,    # Use fetched value or None/empty string
-                rating=fetched_rating # Use fetched value or None
-                # The 'link' field should be auto-generated by the Question model's save() method
+                title=fetched_title,
+                tags=fetched_tags_str, # Save comma-separated string or None
+                rating=fetched_rating
             )
-            # Serialize the newly created question for the response
             output_serializer = QuestionSerializer(question, context={'request': request})
-            logger.info(f"Successfully added question {question.id} ({contest_id}{problem_index}) to assessment {assessment.id}")
+            logger.info(f"Successfully added {platform} question {question.id} ({identifier}) to assessment {assessment.id}")
             return Response(output_serializer.data, status=status.HTTP_201_CREATED)
 
+        except IntegrityError as e:
+             logger.warning(f"Attempt to add duplicate question ({platform}, {identifier}) to assessment {assessment.id}: {e}")
+             # Specific error messages based on constraint name
+             if 'unique_assessment_codeforces_question' in str(e):
+                 error_detail = "This Codeforces problem (contest_id, problem_index) already exists in the assessment."
+             elif 'unique_assessment_codechef_question' in str(e):
+                 # Use the standardized index in the error message
+                 error_detail = f"This CodeChef problem ({problem_index_upper}) already exists in the assessment."
+             else:
+                 error_detail = "This problem already exists in the assessment."
+             return Response({"detail": error_detail}, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
-             # Catch potential errors during Question.objects.create()
-             logger.error(f"Database error saving question {contest_id}{problem_index} for assessment {assessment.id}: {e}", exc_info=True)
-             return Response({"detail": "An error occurred while saving the question to the database."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+             logger.error(f"Database or unexpected error saving question {platform} {identifier} for assessment {assessment.id}: {e}", exc_info=True)
+             return Response({"detail": "An error occurred while saving the question."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['delete'], url_path='remove_question/(?P<question_pk>[^/.]+)', permission_classes=[IsAuthenticated, IsMentor, IsAssessmentMentorOwner])
     def remove_question(self, request, pk=None, question_pk=None):
