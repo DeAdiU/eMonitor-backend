@@ -24,5 +24,6 @@ urlpatterns = [
     path('get-students/', StudentMentorMappingView.as_view(), name='student_analytics'),
     path('codeforces/random-problems/', SuggestCodeforcesProblemView.as_view(), name='codeforces-random-problems'),
     path('scheduler/check-submissions/', SchedulerCheckSubmissionsView.as_view(), name='scheduler-check-submissions'),
+    path('lookup_assessment_question/', LookupAssessmentQuestionView.as_view(), name='lookup-assessment-question'),
     path('', include(router.urls)),
 ]

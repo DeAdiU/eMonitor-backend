@@ -327,14 +327,14 @@ class AssessmentSubmissionSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'student', 'question', 'question_display', 'assessment', 'assessment_title',
             'status', 'evaluation_score', 'evaluation_feedback',
-            'codeforces_verdict', 'codeforces_submission_id',
+            'codeforces_verdict', 'codeforces_submission_id', 'plagiarism_score',
             'codeforces_passed_test_count', 'codeforces_time_consumed_millis',
             'codeforces_memory_consumed_bytes', 'solved_at', 'last_checked_at'
         )
         read_only_fields = ( # Most fields are updated by the backend scheduler
             'id', 'student', 'question', 'question_display', 'assessment', 'assessment_title',
             'status', 'evaluation_score', 'evaluation_feedback',
-            'codeforces_verdict', 'codeforces_submission_id',
+            'codeforces_verdict', 'codeforces_submission_id', 'plagiarism_score',
             'codeforces_passed_test_count', 'codeforces_time_consumed_millis',
             'codeforces_memory_consumed_bytes', 'solved_at', 'last_checked_at'
         )
@@ -395,58 +395,67 @@ class AssessmentDetailSerializer(serializers.ModelSerializer):
 
 # --- Serializer for the Scheduler Update ---
 class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
-    """Serializer used by the scheduler endpoint to update submission status"""
+    """Serializer used by the scheduler endpoint to update submission status. Enforces CodeChef only."""
     student_id = serializers.IntegerField()
     question_id = serializers.IntegerField()
-    assessment_id = serializers.IntegerField() # Added for verification
+    assessment_id = serializers.IntegerField()
     status = serializers.ChoiceField(choices=AssessmentSubmission.STATUS_CHOICES)
+
+    # Evaluation results
     evaluation_score = serializers.FloatField(allow_null=True, required=False)
     evaluation_feedback = serializers.CharField(allow_null=True, required=False, allow_blank=True)
+
+    # Platform results
     codeforces_verdict = serializers.CharField(allow_null=True, required=False, max_length=50)
     codeforces_submission_id = serializers.IntegerField(allow_null=True, required=False)
     codeforces_passed_test_count = serializers.IntegerField(allow_null=True, required=False)
     codeforces_time_consumed_millis = serializers.IntegerField(allow_null=True, required=False)
     codeforces_memory_consumed_bytes = serializers.IntegerField(allow_null=True, required=False)
-    # solved_at is handled in the model's save method
 
-    def update(self, instance, validated_data):
-        instance.status = validated_data.get('status', instance.status)
-        instance.evaluation_score = validated_data.get('evaluation_score', instance.evaluation_score)
-        instance.evaluation_feedback = validated_data.get('evaluation_feedback', instance.evaluation_feedback)
-        instance.codeforces_verdict = validated_data.get('codeforces_verdict', instance.codeforces_verdict)
-        instance.codeforces_submission_id = validated_data.get('codeforces_submission_id', instance.codeforces_submission_id)
-        instance.codeforces_passed_test_count = validated_data.get('codeforces_passed_test_count', instance.codeforces_passed_test_count)
-        instance.codeforces_time_consumed_millis = validated_data.get('codeforces_time_consumed_millis', instance.codeforces_time_consumed_millis)
-        instance.codeforces_memory_consumed_bytes = validated_data.get('codeforces_memory_consumed_bytes', instance.codeforces_memory_consumed_bytes)
-        # last_checked_at and solved_at are handled in save()
-        instance.save()
-        return instance
+    # --- NEW Fields ---
+    submitted_code = serializers.CharField(allow_null=True, required=False, allow_blank=True, style={'base_template': 'textarea.html'})
+    plagiarism_score = serializers.IntegerField(allow_null=True, required=False) # Match model type (IntegerField/FloatField)
+
+    def validate(self, data):
+        # You could add validation here, e.g., check plagiarism_score range if needed
+        score = data.get('plagiarism_score')
+        if score is not None and (score < 0 or score > 100): # Example range check
+             raise serializers.ValidationError({'plagiarism_score': 'Score must be between 0 and 100.'})
+        return data
 
     def create(self, validated_data):
-        # This serializer is primarily for updates, but handle creation if needed
-        # Ensure student, question, assessment exist and are linked correctly
+        """Handles creation of submission status, enforcing CodeChef platform."""
+        # ... (existing logic to fetch student, question, assessment and validate platform/assignment) ...
         try:
             student = User.objects.get(pk=validated_data['student_id'], role='student')
             question = Question.objects.get(pk=validated_data['question_id'])
-            # Verify question belongs to the assessment
+
+            # --- Platform Enforcement ---
+            if question.platform != 'codechef':
+                raise serializers.ValidationError(
+                    f"Submissions are only allowed for CodeChef questions. "
+                    f"Question ID {question.id} is on platform '{question.platform}'."
+                )
+            # --- End Platform Enforcement ---
+
             if question.assessment_id != validated_data['assessment_id']:
                  raise serializers.ValidationError("Question does not belong to the specified assessment.")
-            assessment = question.assessment # Get assessment via question
+            assessment = question.assessment
 
-            # Verify student is assigned to the assessment
             if not assessment.assigned_students.filter(pk=student.id).exists():
                  raise serializers.ValidationError("Student is not assigned to this assessment.")
 
         except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid student_id.")
+            raise serializers.ValidationError({"student_id": "Invalid student_id."})
         except Question.DoesNotExist:
-            raise serializers.ValidationError("Invalid question_id.")
+            raise serializers.ValidationError({"question_id": "Invalid question_id."})
 
-        # Create or update logic
+
+        # Use update_or_create, passing the new fields in defaults
         submission, created = AssessmentSubmission.objects.update_or_create(
             student=student,
             question=question,
-            assessment=assessment, # Set assessment explicitly
+            assessment=assessment,
             defaults={
                 'status': validated_data.get('status'),
                 'evaluation_score': validated_data.get('evaluation_score'),
@@ -456,7 +465,28 @@ class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
                 'codeforces_passed_test_count': validated_data.get('codeforces_passed_test_count'),
                 'codeforces_time_consumed_millis': validated_data.get('codeforces_time_consumed_millis'),
                 'codeforces_memory_consumed_bytes': validated_data.get('codeforces_memory_consumed_bytes'),
+                # Add new fields to defaults
+                'submitted_code': validated_data.get('submitted_code'),
+                'plagiarism_score': validated_data.get('plagiarism_score'),
                 # last_checked_at and solved_at handled in save()
             }
         )
         return submission
+
+    def update(self, instance, validated_data):
+        """Handles updates. Platform check done by model's save()."""
+        instance.status = validated_data.get('status', instance.status)
+        instance.evaluation_score = validated_data.get('evaluation_score', instance.evaluation_score)
+        instance.evaluation_feedback = validated_data.get('evaluation_feedback', instance.evaluation_feedback)
+        instance.codeforces_verdict = validated_data.get('codeforces_verdict', instance.codeforces_verdict)
+        instance.codeforces_submission_id = validated_data.get('codeforces_submission_id', instance.codeforces_submission_id)
+        instance.codeforces_passed_test_count = validated_data.get('codeforces_passed_test_count', instance.codeforces_passed_test_count)
+        instance.codeforces_time_consumed_millis = validated_data.get('codeforces_time_consumed_millis', instance.codeforces_time_consumed_millis)
+        instance.codeforces_memory_consumed_bytes = validated_data.get('codeforces_memory_consumed_bytes', instance.codeforces_memory_consumed_bytes)
+
+        # Update new fields
+        instance.submitted_code = validated_data.get('submitted_code', instance.submitted_code)
+        instance.plagiarism_score = validated_data.get('plagiarism_score', instance.plagiarism_score)
+
+        instance.save() # Model's save() method runs validation again
+        return instance

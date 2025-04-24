@@ -29,8 +29,8 @@ class User(AbstractUser):
 class PlatformProfile(models.Model):
     PLATFORMS = (
         ('codeforces', 'Codeforces'),
-        # ('leetcode', 'LeetCode'), # Keep if needed later
-        # ('codechef', 'CodeChef'), # Keep if needed later
+        ('leetcode', 'LeetCode'), # Keep if needed later
+        ('codechef', 'CodeChef'), # Keep if needed later
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='platforms')
     platform = models.CharField(max_length=20, choices=PLATFORMS, default='codeforces')
@@ -240,15 +240,12 @@ class Question(models.Model):
         return f"{display_title} ({platform_name}, Assessment: {self.assessment.title})"
 
 class AssessmentSubmission(models.Model):
-    """
-    Tracks the status and evaluation result of a student's attempt on a specific
-    question within an assessment, updated by the backend scheduler.
-    """
+    # ... (Existing fields: student, question, assessment, status) ...
     STATUS_CHOICES = (
-        ('NOT_ATTEMPTED', 'Not Attempted'), # Initial state
-        ('PENDING_EVALUATION', 'Pending Evaluation'), # Scheduler is checking or has triggered check
-        ('EVALUATED', 'Evaluated'), # Evaluation complete (check verdict/score for outcome)
-        ('ERROR', 'Evaluation Error'), # An error occurred during check/evaluation
+        ('NOT_ATTEMPTED', 'Not Attempted'),
+        ('PENDING_EVALUATION', 'Pending Evaluation'),
+        ('EVALUATED', 'Evaluated'),
+        ('ERROR', 'Evaluation Error'),
     )
 
     student = models.ForeignKey(
@@ -265,45 +262,82 @@ class AssessmentSubmission(models.Model):
     assessment = models.ForeignKey(
         Assessment,
         on_delete=models.CASCADE,
-        related_name='submissions' # Allows easy filtering: assessment.submissions.all()
+        related_name='submissions'
     )
     status = models.CharField(
         max_length=25,
         choices=STATUS_CHOICES,
         default='NOT_ATTEMPTED'
     )
-    # Store evaluation results
-    evaluation_score = models.FloatField(null=True, blank=True, help_text="Score (0-100) from AI/fallback evaluation")
-    evaluation_feedback = models.TextField(blank=True, null=True, help_text="Feedback from AI/fallback evaluation")
-    codeforces_verdict = models.CharField(max_length=50, blank=True, null=True, help_text="Verdict from Codeforces (e.g., OK, WRONG_ANSWER)")
-    codeforces_submission_id = models.BigIntegerField(null=True, blank=True, help_text="ID of the evaluated Codeforces submission")
-    codeforces_passed_test_count = models.IntegerField(null=True, blank=True, help_text="Number of tests passed for the evaluated submission")
+
+    # --- Evaluation Results ---
+    evaluation_score = models.FloatField(null=True, blank=True, help_text="Score (0-100) based on verdict/tests/AI")
+    evaluation_feedback = models.TextField(blank=True, null=True, help_text="Feedback from evaluation")
+
+    # --- Platform-Specific Data ---
+    # Renaming these might be good long-term if supporting multiple platforms,
+    # but functionally they work for storing CodeChef data too.
+    codeforces_verdict = models.CharField(max_length=50, blank=True, null=True, help_text="Verdict from Platform (e.g., AC, WA, TLE)")
+    codeforces_submission_id = models.BigIntegerField(null=True, blank=True, help_text="ID of the evaluated platform submission")
+    codeforces_passed_test_count = models.IntegerField(null=True, blank=True, help_text="Number of tests passed")
     codeforces_time_consumed_millis = models.IntegerField(null=True, blank=True)
     codeforces_memory_consumed_bytes = models.BigIntegerField(null=True, blank=True)
-    
-    solved_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the question was successfully solved (verdict='OK')")
+
+    # --- NEW: Submitted Code ---
+    submitted_code = models.TextField(
+        blank=True,
+        null=True,
+        help_text="The source code submitted by the student."
+    )
+
+    # --- NEW: Plagiarism Score ---
+    # Using PositiveIntegerField assuming a score like 0-100. Use FloatField if it's 0.0-1.0.
+    plagiarism_score = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Calculated plagiarism score (e.g., 0-100), if available."
+        # Add validators=[MinValueValidator(0), MaxValueValidator(100)] if desired
+    )
+    # Optional: Add a field for plagiarism report details/link if needed later
+    # plagiarism_details = models.TextField(blank=True, null=True)
+
+    # --- Timestamps ---
+    solved_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the question was successfully solved (verdict='AC')")
     last_checked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the backend last checked/updated this status")
 
+
     class Meta:
-        unique_together = ('student', 'question') # A student has one submission status per question
+        unique_together = ('student', 'question')
         ordering = ['assessment', 'student', 'question']
         verbose_name = "Assessment Submission Status"
         verbose_name_plural = "Assessment Submission Statuses"
 
     def __str__(self):
-        return f"{self.student.username} - Q: {self.question.contest_id}{self.question.problem_index} (A: {self.assessment.title}) - {self.get_status_display()}"
+        q = self.question
+        identifier = f"{q.contest_id}{q.problem_index}" if q.platform == 'codeforces' else q.problem_index
+        return f"{self.student.username} - Q: {identifier} ({q.get_platform_display()}) (A: {self.assessment.title}) - {self.get_status_display()}"
 
     def save(self, *args, **kwargs):
-        # Ensure the question belongs to the assessment
+        # --- Platform Enforcement (CodeChef Only) ---
+        if self.question_id and self.question.platform != 'codechef':
+            raise ValidationError(
+                f"Submissions are only allowed for CodeChef questions. "
+                f"Question '{self.question}' is on platform '{self.question.platform}'."
+            )
+
+        # --- Other Validations/Logic ---
         if self.question_id and self.assessment_id and self.question.assessment_id != self.assessment_id:
             raise ValidationError(f"Question '{self.question}' does not belong to Assessment '{self.assessment}'.")
 
-        # Automatically set solved_at timestamp if status is EVALUATED and verdict is OK
-        if self.status == 'EVALUATED' and self.codeforces_verdict == 'OK' and not self.solved_at:
-            # Use last_checked_at or now() as an approximation if submission time isn't available
+        # Set solved_at based on verdict (Assuming 'AC' for Accepted on CodeChef)
+        # Adjust 'OK' to 'AC' or whatever CodeChef's accepted verdict string is.
+        accepted_verdict = 'AC' # Or 'OK', check CodeChef's actual verdict string
+        if self.status == 'EVALUATED' and self.codeforces_verdict == accepted_verdict and not self.solved_at:
             self.solved_at = self.last_checked_at or timezone.now()
+        # If verdict changes away from accepted, maybe clear solved_at? Optional.
+        # elif self.status == 'EVALUATED' and self.codeforces_verdict != accepted_verdict and self.solved_at:
+        #     self.solved_at = None
 
-        # Update last_checked_at timestamp automatically on save
         self.last_checked_at = timezone.now()
 
         super().save(*args, **kwargs)

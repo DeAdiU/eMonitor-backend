@@ -82,73 +82,84 @@ def evaluate_submission_with_gemini(
             "passedTestCount": submission_details.get("passedTestCount"),
             "timeConsumedMillis": submission_details.get("timeConsumedMillis"),
             "memoryConsumedBytes": submission_details.get("memoryConsumedBytes"),
+            "plagiarismVerdict": submission_details.get("plagiarismVerdict")
         }, indent=2)
-
+    print(submission_details)
+    print(submission_details_json)
 
     prompt = f"""
-You are an AI assistant evaluating Codeforces submissions based ONLY on provided metadata and user preferences. You CANNOT see the actual source code.
+You are an AI assistant evaluating Codeforces/CodeChef submissions based ONLY on provided metadata and user preferences. You CANNOT see the actual source code.
 
 **Submission Metadata:**
 ```json
 {submission_details_json}
+
+    
+
+IGNORE_WHEN_COPYING_START
+Use code with caution. Python
+IGNORE_WHEN_COPYING_END
+
+(The JSON above should now include a "plagiarismScore" key, e.g., "plagiarismScore": 15)
+
 User Preference Criteria:
 "{preferred_criteria_str}"
 
 Evaluation Task:
 Based only on the metadata and preferences above, provide an evaluation score (a single number between 0 and 100) and constructive feedback (a string). Consider the following guidelines derived from the user preference "{preferred_criteria_str}":
 
-    Verdict: This is the most important factor.
+      
+1. Verdict: This is the most important factor for initial scoring, but can be overridden by plagiarism.
+    - If verdict is "OK" (or "AC"): Base score should be higher (e.g., start around 70). Evaluate further based on other criteria below.
+    - If verdict is not "OK" (e.g., "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "COMPILATION_ERROR", "RUNTIME_ERROR"): The score MUST be significantly lower (e.g., 5-40 range).
+        - If passedTestCount is available and greater than 0, give slightly more points within the low range (e.g., 15 + passedTestCount). Max score for non-OK should still be low (e.g., capped at 40 *before* considering plagiarism).
+        - If passedTestCount is 0 or unavailable for a non-OK verdict, assign a very low score (e.g., 5-15 *before* considering plagiarism).
+        - Mention the specific failure verdict and passedTestCount (if applicable) in the feedback.
 
-        If verdict is "OK": Base score should be higher (e.g., start around 70). Evaluate further based on other criteria.
+2. Plagiarism Score: Check the `plagiarismScore` field (0-100, higher means more similar to other submissions). This factor has high priority.
+    - If `plagiarismScore` is high (e.g., > 70): Assign a very low final score (e.g., 0-10), regardless of verdict or other factors. The feedback MUST prioritize and state "High plagiarism suspected (Score: [plagiarismScore])" or similar.
+    - If `plagiarismScore` is moderate (e.g., 30-70): Apply a significant penalty to the score calculated from other factors (e.g., reduce score by 40-60 points, ensuring it doesn't go below 5-10). Feedback should clearly mention "Moderate similarity to other submissions found (Score: [plagiarismScore])".
+    - If `plagiarismScore` is low (e.g., 10-30): Apply a small penalty (e.g., -5 to -10 points from the score calculated based on other factors). Feedback can mention "Minor code similarities found (Score: [plagiarismScore])".
+    - If `plagiarismScore` is very low (e.g., < 10): No penalty for plagiarism. Feedback can optionally mention "Code appears original" if the verdict was also OK.
 
-        If verdict is not "OK" (e.g., "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "COMPILATION_ERROR", "RUNTIME_ERROR"): The score MUST be significantly lower (e.g., 5-40 range).
+3. Language Preference (User wants C++ or Python or Java) but if {preferred_criteria_str} is saying any language use that if not mention then the bracket language: (Apply *before* plagiarism penalty, except if plagiarism is high)
+    - Check `programmingLanguage`.
+    - If it's C++ (any version) or Python/PyPy or Java: Award bonus points (e.g., +10-15) ONLY if the verdict is "OK".
+    - If it's another language: Award fewer or no language bonus points.
 
-            If passedTestCount is available and greater than 0, give slightly more points within the low range (e.g., 15 + passedTestCount). Max score for non-OK should still be low (e.g., capped at 40).
+4. Time Complexity Preference (User wants "less time complexity"): (Apply *before* plagiarism penalty, except if plagiarism is high)
+    - Infer efficiency from `timeConsumedMillis` ONLY IF verdict is "OK". Lower time is better.
+    - Very Low Time (e.g., < 200ms): Add bonus points (e.g., +10).
+    - Moderate Time (e.g., 200ms - 1000ms): Add smaller bonus points (e.g., +5).
+    - High Time (e.g., > 1000ms): Add no points or potentially deduct slightly (-5). Mention the time in feedback relative to the preference.
+    - Ignore time score if verdict is not "OK".
 
-            If passedTestCount is 0 or unavailable for a non-OK verdict, assign a very low score (e.g., 5-15).
+5. Memory Usage: (Apply *before* plagiarism penalty, except if plagiarism is high)
+    - Consider `memoryConsumedBytes` ONLY IF verdict is "OK". Lower memory is generally good but less prioritized unless mentioned in criteria.
+    - Very Low Memory (e.g., < 65536 KB): Add small bonus (e.g., +3).
+    - Moderate/High Memory: Neutral or tiny penalty.
 
-            Mention the specific failure verdict and passedTestCount (if applicable) in the feedback.
+6. Final Score Calculation:
+    - Start with base score from Verdict.
+    - Add/subtract points based on Language, Time, Memory (if verdict is OK).
+    - Apply Plagiarism penalty based on its score range. This penalty can drastically reduce or override the score from other factors.
+    - Ensure the final score is clamped between 0 and 100.
 
-    Language Preference (User wants C++ or Python or Java) but if {preferred_criteria_str} is saying any language use that if not mention then the bracket language:
+    
 
-        Check programmingLanguage.
-
-        If it's C++ (any version) or Python/PyPy: Award bonus points (e.g., +10-15) if the verdict is "OK". If verdict is not "OK", using a preferred language doesn't help much, so don't add significant points.
-
-        If it's another language: Award fewer or no language bonus points.
-
-    Time Complexity Preference (User wants "less time complexity"):
-
-        Infer efficiency from timeConsumedMillis ONLY IF verdict is "OK". Lower time is better.
-
-        Very Low Time (e.g., < 200ms): Add bonus points (e.g., +10).
-
-        Moderate Time (e.g., 200ms - 1000ms): Add smaller bonus points (e.g., +5).
-
-        High Time (e.g., > 1000ms): Add no points or potentially deduct slightly (-5). Mention the time in feedback relative to the preference.
-
-        Ignore time score if verdict is not "OK".
-
-    Memory Usage:
-
-        Consider memoryConsumedBytes ONLY IF verdict is "OK". Lower memory is generally good but not explicitly prioritized by the user preference string.
-
-        Very Low Memory (e.g., < 65536 KB): Add small bonus (e.g., +3).
-
-        Moderate/High Memory: Neutral or tiny penalty.
-
-    Final Score: Ensure the final score is between 0 and 100.
+IGNORE_WHEN_COPYING_START
+Use code with caution.
+IGNORE_WHEN_COPYING_END
 
 Output Format:
-Return ONLY a valid JSON object with exactly two keys: "score" (a number) and "feedback" (a string). Do not include ```json markdown delimiters around the final JSON output.
+Return ONLY a valid JSON object with exactly two keys: "score" (a number between 0 and 100) and "feedback" (a string). Do not include ```json markdown delimiters around the final JSON output.
 
-Example for OK: {{"score": 85, "feedback": "Good submission. Used preferred language (C++). Excellent time performance (150ms) aligning with low time complexity preference. Memory usage is acceptable."}}
-Example for WA: {{"score": 22, "feedback": "Submission failed: WRONG_ANSWER on test 3. Passed 2 tests. Did not meet correctness requirements. Language used was Python."}}
-Example for TLE: {{"score": 15, "feedback": "Submission failed: TIME_LIMIT_EXCEEDED on test 5. Passed 4 tests. Performance did not meet time limits, contrary to the preference for low time complexity. Language used was C++."}}
+Example for OK (Low Plag): {{"score": 78, "feedback": "Good submission (OK Verdict). Used preferred language (C++). Excellent time performance (150ms). Minor code similarities found (Plag Score: 12)."}}
+Example for WA (High Plag): {{"score": 5, "feedback": "High plagiarism suspected (Score: 85). Submission also failed: WRONG_ANSWER on test 3 (Passed 2 tests)."}}
+Example for OK (High Plag): {{"score": 8, "feedback": "High plagiarism suspected (Score: 92), overriding correctness. Verdict was OK, but similarity is too high."}}
+Example for TLE (Moderate Plag): {{"score": 10, "feedback": "Moderate similarity to other submissions found (Plag Score: 45). Submission also failed: TIME_LIMIT_EXCEEDED on test 5 (Passed 4 tests)."}}
 
-Now, evaluate the provided submission based only on the metadata and preferences. Generate the JSON output.
-"""
-
+Now, evaluate the provided submission based only on the metadata (including plagiarismScore) and preferences. Generate the JSON output."""
 
     try:
         response = GEMINI_MODEL.generate_content(

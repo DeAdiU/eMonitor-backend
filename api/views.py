@@ -24,12 +24,15 @@ from django.db.models import Q
 from .serializers import *
 from rest_framework.decorators import action
 from .codeforces import *
-from django.utils import timezone
+from django.utils import timezone as ti
 import datetime
 from django.db.models import Avg, Max, Min, Count, F, FloatField, Case, When, Q, Sum
 from django.db.models.functions import Cast
 from .codeforces_api import *
 from .codechef_questions import *
+from .plag_service import *
+from .codechef_eval import *
+from .eval_service import *
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
@@ -770,6 +773,138 @@ class AssessmentViewSet(viewsets.ModelViewSet):
 
         return Response(results, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsStudent])
+    def trigger_codechef_check(self, request, pk=None):
+        """
+        Synchronously triggers CodeChef check: Scrapes, runs plagiarism, evaluates.
+        WARNING: High risk of timeouts.
+        Requires 'question_id' in request data.
+        """
+        start_time = time.time()
+        assessment = self.get_object()
+        student = request.user
+
+        # --- !!! ADD DEADLINE CHECK HERE !!! ---
+        now = ti.now()
+        if assessment.deadline < now:
+            logger.warning(f"Attempt to trigger check for assessment {assessment.id} after deadline by student {student.id}.")
+            return Response(
+                {"detail": "The deadline for this assessment has passed. Submissions can no longer be checked or evaluated."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # --- End Deadline Check ---
+
+        # --- Validation and Setup ---
+        # (Keep the validation logic from the previous version)
+        if student.role != 'student': return Response({"detail": "Only students can trigger this check."}, status=status.HTTP_403_FORBIDDEN)
+        question_id = request.data.get('question_id')
+        if not question_id: return Response({"detail": "Missing 'question_id' in request data."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            question = Question.objects.get(pk=question_id, assessment=assessment)
+        except Question.DoesNotExist: return Response({"detail": "Question not found within this assessment."}, status=status.HTTP_404_NOT_FOUND)
+        if not assessment.assigned_students.filter(pk=student.pk).exists(): return Response({"detail": "You are not assigned to this assessment."}, status=status.HTTP_403_FORBIDDEN)
+        if question.platform != 'codechef': return Response({"detail": "This check is only for CodeChef questions."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- Find/Create Submission & Get Handle ---
+        # (Keep the logic from the previous version)
+        submission, created = AssessmentSubmission.objects.get_or_create(
+            student=student, question=question, assessment=assessment,
+            defaults={'status': 'PENDING_EVALUATION'}
+        )
+        if not created: # Reset fields if re-triggering (before deadline)
+            submission.status = 'PENDING_EVALUATION'; submission.evaluation_score = None; submission.evaluation_feedback = None; submission.plagiarism_score = None; submission.submitted_code = None; submission.verdict = None; submission.passed_test_count = None; submission.time_consumed_millis = None; submission.memory_consumed_bytes = None; submission.platform_submission_id = None; submission.language = None; submission.save()
+
+        try:
+            profile = PlatformProfile.objects.get(user=student, platform='codechef')
+            codechef_handle = profile.profile_id
+            if not codechef_handle: raise ValueError("CodeChef handle is empty.")
+        except (ObjectDoesNotExist, ValueError) as e:
+            msg = f"Could not get valid CodeChef handle for student {student.username}: {e}"
+            logger.error(msg)
+            submission.status = 'ERROR'; submission.evaluation_feedback = msg; submission.save()
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        problem_code = question.problem_index
+
+        # --- Step 1: Scrape Data ---
+        # (Keep the logic from the previous version)
+        try:
+            logger.info(f"Calling scraper for PK: {submission.pk}")
+            scraped_data = scrape_codechef_submission(codechef_handle, problem_code)
+            # ... (rest of scraping logic, updating DB) ...
+            if not scraped_data:
+                 msg = f"Scraper found no recent submission for {codechef_handle} on {problem_code}."
+                 logger.warning(msg)
+                 submission.status = 'ERROR'; submission.evaluation_feedback = msg; submission.save()
+                 return Response({"detail": msg}, status=status.HTTP_404_NOT_FOUND)
+
+            new_submission_id = scraped_data.get('platform_submission_id')
+            if new_submission_id and submission.platform_submission_id == new_submission_id:
+                 logger.info(f"Submission ID {new_submission_id} already processed. Skipping.")
+                 return Response({"detail": "Submission already processed.", "submission_id": new_submission_id}, status=status.HTTP_200_OK)
+
+            for key, value in scraped_data.items():
+                if hasattr(submission, key): setattr(submission, key, value)
+            submission.last_checked_at = ti.now()
+            submission.save()
+            logger.info(f"DB updated with scraped data for PK: {submission.pk}")
+
+        except ConnectionError as e: # Catch errors from scraper
+            msg = f"Scraping failed for PK {submission.pk}: {e}"
+            logger.error(msg, exc_info=True)
+            submission.status = 'ERROR'; submission.evaluation_feedback = msg[:250]; submission.save()
+            return Response({"detail": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e: # Catch unexpected errors during scrape call
+            msg = f"Unexpected error during scraping for PK {submission.pk}: {e}"
+            logger.error(msg, exc_info=True)
+            submission.status = 'ERROR'; submission.evaluation_feedback = msg[:250]; submission.save()
+            return Response({"detail": "An unexpected error occurred during scraping."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # --- Step 2: Plagiarism Check ---
+        # (Keep the logic from the previous version)
+        try:
+            logger.info(f"Calling plagiarism service for PK: {submission.pk}")
+            plag_score_percent = calculate_max_plagiarism(submission)
+            submission.plagiarism_score = plag_score_percent
+            submission.save()
+            logger.info(f"Plagiarism check completed for PK: {submission.pk}. Score: {plag_score_percent}")
+        except Exception as e:
+            logger.error(f"Error during plagiarism check for PK {submission.pk}: {e}", exc_info=True)
+            submission.plagiarism_score = None
+            submission.save()
+
+        # --- Step 3: Evaluation ---
+        # (Keep the logic from the previous version)
+        try:
+            logger.info(f"Calling evaluation service for PK: {submission.pk}")
+            evaluation_result = evaluate_submission(submission, assessment)
+            submission.evaluation_score = evaluation_result.get('score')
+            submission.evaluation_feedback = evaluation_result.get('feedback')
+            submission.status = 'EVALUATED'
+            submission.save()
+            logger.info(f"Evaluation completed for PK: {submission.pk}. Score: {submission.evaluation_score}")
+        except Exception as e:
+            msg = f"Error during evaluation for PK {submission.pk}: {e}"
+            logger.error(msg, exc_info=True)
+            submission.status = 'ERROR'
+            submission.evaluation_feedback = f"Evaluation failed: {msg[:200]}"
+            submission.evaluation_score = None
+            submission.save()
+            return Response({"detail": "An error occurred during evaluation."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # --- Final Success Response ---
+        # (Keep the logic from the previous version)
+        end_time = time.time()
+        processing_time = round(end_time - start_time, 2)
+        logger.info(f"Total processing time for PK {submission.pk}: {processing_time:.2f} seconds")
+        return Response({
+            "detail": "Submission checked, evaluated, and updated successfully.",
+            "submission_id": submission.codeforces_submission_id,
+            "plagiarism_score": submission.plagiarism_score,
+            "evaluation_score": submission.evaluation_score,
+            "processing_time_seconds": processing_time
+            }, status=status.HTTP_200_OK)
+            
     # ... other viewset methods ...
 
     # ... other viewset methods ...
@@ -788,6 +923,39 @@ class AssessmentViewSet(viewsets.ModelViewSet):
     #         # Students see assessments assigned to them
     #         return user.assigned_assessments.all()
     #     return Assessment.objects.none() # Or handle admin/other roles
+class LookupAssessmentQuestionView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request, *args, **kwargs):
+        problem_code = request.query_params.get('problem_code', None)
+        if not problem_code:
+            return Response({"detail": "Missing 'problem_code' query parameter."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        now = ti.now()
+
+        # Find active, assigned questions matching the codechef problem code
+        matching_questions = Question.objects.filter(
+            platform='codechef',
+            problem_index__iexact=problem_code, # Case-insensitive match
+            assessment__assigned_students=user,
+            assessment__deadline__gt=now # Only consider active assessments
+        ).select_related('assessment').order_by('-assessment__deadline') # Prioritize closer deadlines?
+
+        if not matching_questions.exists():
+            return Response({"detail": "No active, assigned assessment found containing this CodeChef problem."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Handle multiple matches (e.g., return the one with the nearest deadline)
+        # For simplicity, let's take the first one based on ordering
+        target_question = matching_questions.first()
+
+        return Response({
+            "assessment_id": target_question.assessment.id,
+            "question_id": target_question.id,
+            "assessment_title": target_question.assessment.title # Optional context
+        }, status=status.HTTP_200_OK)
+
+
 
 # --- Codeforces Problem Fetching View ---
 class SuggestCodeforcesProblemView(generics.GenericAPIView):
@@ -889,7 +1057,7 @@ class SchedulerCheckSubmissionsView(generics.GenericAPIView):
     VERDICT_NOT_FOUND_DEADLINE = "NOT_FOUND_BY_DEADLINE"
 
     def post(self, request, *args, **kwargs):
-        start_run_time = timezone.now()
+        start_run_time = ti.now()
         logger.info(f"Scheduler run starting at {start_run_time}")
         processed_count = 0
         created_count = 0
@@ -1020,7 +1188,7 @@ class SchedulerCheckSubmissionsView(generics.GenericAPIView):
                                         "codeforces_time_consumed_millis": submission_details.get('timeConsumedMillis'),
                                         "codeforces_memory_consumed_bytes": submission_details.get('memoryConsumedBytes'),
                                         # Add solved_at if verdict is OK?
-                                        "solved_at": timezone.make_aware(datetime.datetime.fromtimestamp(submission_details.get('creationTimeSeconds'))) if submission_details.get('verdict') == 'OK' else None
+                                        "solved_at": ti.make_aware(datetime.datetime.fromtimestamp(submission_details.get('creationTimeSeconds'))) if submission_details.get('verdict') == 'OK' else None
                                     }
                                     logger.info(f"      -> Evaluation Success: Score={update_data['evaluation_score']}, Verdict={update_data['codeforces_verdict']}")
                                     # Use serializer for validation and saving
@@ -1104,7 +1272,7 @@ class SchedulerCheckSubmissionsView(generics.GenericAPIView):
                     ).update(status=self.STATUS_ERROR, evaluation_feedback=f"Scheduler processing error for student: {student_loop_exc}")
                     error_count += 1
 
-        end_run_time = timezone.now()
+        end_run_time = ti.now()
         duration = end_run_time - start_run_time
         logger.info("\n--- Scheduler Run Summary ---")
         logger.info(f"Run Duration: {duration}")

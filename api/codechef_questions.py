@@ -125,3 +125,5 @@ def fetch_problem_metadata_cc(problem_index):
                 logger.debug(f"Closed WebDriver for {problem_code}")
             except Exception as e:
                 logger.error(f"Error closing WebDriver for {problem_code}: {e}")
+
+
