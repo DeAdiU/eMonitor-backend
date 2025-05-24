@@ -2,22 +2,18 @@ import requests
 import json
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-import time # For potential delays if needed
+import time 
 
-# --- Codeforces API Configuration ---
 CODEFORCES_API_URL = 'https://codeforces.com/api/'
-# It's good practice to include a User-Agent
 CF_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 
-# --- Helper Function ---
-
 def _fetch_codeforces_api(endpoint, params):
     """Helper to fetch data from Codeforces API and handle basic errors."""
     try:
-        response = requests.get(f"{CODEFORCES_API_URL}{endpoint}", params=params, headers=CF_HEADERS, timeout=15) # 15 second timeout
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        response = requests.get(f"{CODEFORCES_API_URL}{endpoint}", params=params, headers=CF_HEADERS, timeout=15)
+        response.raise_for_status()
         data = response.json()
         if data.get('status') == 'OK':
             return data.get('result')
@@ -39,7 +35,6 @@ def get_cf_user_submissions(handle, count=1000):
     params = {"handle": handle, "count": count}
     return _fetch_codeforces_api("user.status", params)
 
-# --- Main Functions ---
 
 def get_cf_user_info(handle):
     """
@@ -50,7 +45,6 @@ def get_cf_user_info(handle):
     result = _fetch_codeforces_api("user.info", params)
     if result and isinstance(result, list) and len(result) > 0:
         user_info = result[0]
-        # Provide defaults for fields that might be missing
         return {
             "handle": user_info.get("handle"),
             "rating": user_info.get("rating"),
@@ -101,11 +95,10 @@ def get_cf_solved_counts(handle, submission_limit=1000):
             problem = sub.get('problem', {})
             problem_id = f"{problem.get('contestId')}-{problem.get('index')}"
             
-            # Count unique solved problems
             if problem_id not in solved_problems:
                 solved_problems.add(problem_id)
                 rating = problem.get('rating')
-                difficulty = "Unrated" # Default
+                difficulty = "Unrated" 
                 if rating is not None:
                     if rating < 1200: difficulty = "Easy"
                     elif rating < 1600: difficulty = "Medium"
@@ -115,15 +108,12 @@ def get_cf_solved_counts(handle, submission_limit=1000):
 
                 if difficulty in counts:
                     counts[difficulty]["count"] += 1
-                else: # Should not happen with current categories, but safety check
+                else:
                      counts["Unrated"]["count"] += 1
 
     counts["All"]["count"] = len(solved_problems)
-    counts["All"]["submissions"] = total_ac_submissions # Total AC submissions might differ from unique problems
+    counts["All"]["submissions"] = total_ac_submissions 
 
-    # Add submission counts (total AC submissions per category - less meaningful than unique solves)
-    # This part is less direct than LeetCode's structure. We'll approximate by assigning
-    # all AC submissions to their problem's category.
     ac_submissions_by_cat = defaultdict(int)
     for sub in submissions:
         if sub.get('verdict') == 'OK':
@@ -142,14 +132,7 @@ def get_cf_solved_counts(handle, submission_limit=1000):
         if diff_key != "All":
             counts[diff_key]["submissions"] = ac_submissions_by_cat.get(diff_key, 0)
 
-
-    # Convert to list format similar to LeetCode if needed, or return dict
-    # Example list format:
-    # return [
-    #     {"difficulty": k, "count": v["count"], "submissions": v["submissions"]}
-    #     for k, v in counts.items()
-    # ]
-    return counts # Return dictionary for clarity
+    return counts
 
 
 def get_cf_language_distribution(handle, submission_limit=1000):
@@ -174,8 +157,6 @@ def get_cf_language_distribution(handle, submission_limit=1000):
                 solved_problems.add(problem_id)
                 language_counts[language] += 1
 
-    # Convert to list format similar to LeetCode if needed
-    # return [{"languageName": lang, "problemsSolved": count} for lang, count in language_counts.items()]
     return dict(sorted(language_counts.items(), key=lambda item: item[1], reverse=True))
 
 
@@ -219,7 +200,6 @@ def get_cf_submission_calendar(handle, submission_limit=5000):
 
     month_wise = defaultdict(int)
     week_wise = defaultdict(int)
-    # Consider submissions from the last year for relevance
     today = datetime.now(timezone.utc)
     one_year_ago = today - timedelta(days=365)
 
@@ -229,7 +209,6 @@ def get_cf_submission_calendar(handle, submission_limit=5000):
             sub_date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
             if sub_date >= one_year_ago:
                 month_key = sub_date.strftime('%Y-%m')
-                # %U: Week number (Sunday as first day), %W: Week number (Monday as first day)
                 week_key = sub_date.strftime('%Y-W%U')
                 month_wise[month_key] += 1
                 week_wise[week_key] += 1
@@ -246,7 +225,6 @@ def get_cf_rating_history(handle):
     params = {"handle": handle}
     result = _fetch_codeforces_api("user.rating", params)
     if result and isinstance(result, list):
-        # Format data for easier plotting (e.g., for chart libraries)
         history = []
         for change in result:
             timestamp = change.get('ratingUpdateTimeSeconds')
@@ -260,6 +238,6 @@ def get_cf_rating_history(handle):
                     "oldRating": change.get('oldRating'),
                     "newRating": change.get('newRating')
                 })
-        return history # Return list sorted by time (API default)
+        return history
     return None
 

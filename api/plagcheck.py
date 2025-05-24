@@ -5,10 +5,9 @@ import sys
 import os
 import uuid
 
-# --- Language Specific Imports ---
 try:
     import clang.cindex
-    # Configure libclang path dynamically
+    
     def find_libclang():
         env_path = os.environ.get('LIBCLANG_PATH')
         if env_path and os.path.exists(env_path):
@@ -61,10 +60,8 @@ except ImportError:
     logging.warning("javalang library not found (pip install javalang). Java checking disabled.")
     JAVALANG_AVAILABLE = False
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# --- Python AST Normalization ---
 class PythonNormalizeTransformer(ast.NodeTransformer):
     """Normalizes Python AST by renaming identifiers."""
     def __init__(self):
@@ -149,7 +146,6 @@ def python_ast_to_sequence(tree):
         sequence.append(node_repr)
     return sequence
 
-# --- C/C++ AST Normalization ---
 class ClangNormalizer:
     def __init__(self):
         self.name_map = {}
@@ -202,7 +198,6 @@ def normalize_clang_ast(cursor):
     sequence = normalizer.normalize(cursor)
     return sequence, normalizer.name_map
 
-# --- Java AST Normalization ---
 class JavaNormalizer:
     def __init__(self):
         self.name_map = {}
@@ -370,7 +365,6 @@ def java_ast_to_sequence(tree):
 
     return sequence
 
-# --- Main Plag Checker Function ---
 def plagchecker(code1: str, code2: str, language: str) -> float:
     """
     Compares two code snippets for similarity using AST comparison.

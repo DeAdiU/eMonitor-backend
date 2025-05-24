@@ -1,12 +1,11 @@
-# plagiarism_service.py
 import logging
-from .models import AssessmentSubmission # Assuming models are in the same app
+from .models import AssessmentSubmission
 try:
     from .plagcheck import plagchecker
     PLAGCHECK_AVAILABLE = True
 except ImportError:
     PLAGCHECK_AVAILABLE = False
-    def plagchecker(code1, code2, language): return 0.0 # Dummy
+    def plagchecker(code1, code2, language): return 0.0 
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ def calculate_max_plagiarism(current_submission: AssessmentSubmission) -> int | 
         return None
 
     current_code = current_submission.submitted_code
-    current_lang_raw = getattr(current_submission, 'language', '').lower() # Use getattr for safety
+    current_lang_raw = getattr(current_submission, 'language', '').lower() 
 
     # Map scraped language to plagchecker language ('python', 'cpp', 'java')
     current_lang = None
@@ -41,25 +40,23 @@ def calculate_max_plagiarism(current_submission: AssessmentSubmission) -> int | 
     other_submissions = AssessmentSubmission.objects.filter(
         question=current_submission.question,
         assessment=current_submission.assessment
-    ).exclude(pk=current_submission.pk).select_related('student') # Exclude self
+    ).exclude(pk=current_submission.pk).select_related('student') 
 
     if not other_submissions:
         logger.info("No other submissions found for plagiarism comparison.")
-        return 0 # No plagiarism if no others exist
+        return 0 
 
     max_plag_score = 0.0
     logger.info(f"Comparing against {other_submissions.count()} other submission(s).")
     for other_sub in other_submissions:
         if other_sub.submitted_code:
             try:
-                # Compare current code against other code using current code's language
                 score = plagchecker(current_code, other_sub.submitted_code, current_lang)
                 if score > max_plag_score:
                     max_plag_score = score
                 logger.debug(f"  Compared with {other_sub.student.username} (Sub PK: {other_sub.pk}), Score: {score:.4f}")
             except Exception as plag_err:
                 logger.error(f"Error running plagchecker between {current_submission.pk} and {other_sub.pk}: {plag_err}", exc_info=True)
-                # Decide if one error should stop all checks or just skip this comparison
 
     logger.info(f"Max plagiarism score found: {max_plag_score:.4f}")
-    return int(max_plag_score * 100) # Return as 0-100 int
+    return int(max_plag_score * 100)

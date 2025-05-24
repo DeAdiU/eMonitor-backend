@@ -25,8 +25,6 @@ class BasicUserSerializer(serializers.ModelSerializer):
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
-
-        # Check if user is verified (Assuming you have a 'is_verified' field in User model)
         if not self.user.is_verified:
             raise AuthenticationFailed("Your account is not verified.")
 
@@ -45,7 +43,6 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
     def create(self, validated_data):
-        # Create the user
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -58,12 +55,10 @@ class UserSerializer(serializers.ModelSerializer):
             is_verified=False
         )
 
-        # Generate verification token and URL
         token = default_token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         verification_url = f"{settings.FRONTEND_URL}/verify-email/?uid={uid}&token={token}/"
 
-        # Send verification email
         try:
             send_mail(
                 'Verify Your Email Address',
@@ -84,20 +79,16 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
     def update(self, instance, validated_data):
-        # Update username
         instance.username = validated_data.get('username', instance.username)
-
-        # Handle email change with new verification
         if 'email' in validated_data and validated_data['email'] != instance.email:
             instance.email = validated_data['email']
             instance.is_verified = False
             
-            # Generate new verification token
             token = default_token_generator.make_token(instance)
             uid = urlsafe_base64_encode(force_bytes(instance.pk))
             verification_url = f"/verify-email/?uid={uid}&token={token}"
             
-            # Send verification email
+            
             try:
                 send_mail(
                     'Verify Your New Email Address',
@@ -111,7 +102,6 @@ class UserSerializer(serializers.ModelSerializer):
                 logger.error(f"Failed to send verification email to {instance.email}: {str(e)}")
                 raise serializers.ValidationError(f"Failed to send verification email: {str(e)}")
 
-        # Update password if provided
         if 'password' in validated_data:
             instance.set_password(validated_data['password'])
 
@@ -128,7 +118,6 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
     def validate_email(self, email):
-        # Check if email exists in the system
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
@@ -171,14 +160,13 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({"confirm_password": "Passwords do not match"})
 
-        # Validate UID and token
         try:
             uid = force_str(urlsafe_base64_decode(data['uid']))
             user = User.objects.get(pk=uid)
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
             raise serializers.ValidationError("Invalid reset link")
 
-        # Validate token
+    
         if not default_token_generator.check_token(user, data['token']):
             raise serializers.ValidationError("Invalid or expired reset link")
 
@@ -188,8 +176,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         try:
             uid = force_str(urlsafe_base64_decode(validated_data['uid']))
             user = User.objects.get(pk=uid)
-            
-            # Set new password
+        
             user.set_password(validated_data['new_password'])
             user.save()
             
@@ -213,17 +200,16 @@ class MentorStudentMappingSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     assessment_title = serializers.CharField(source='assessment.title', read_only=True)
-    # Display platform name instead of code
     platform_display = serializers.CharField(source='get_platform_display', read_only=True)
 
     class Meta:
         model = Question
         fields = (
             'id', 'assessment', 'assessment_title',
-            'platform',         # Add platform (writable)
-            'platform_display', # Add platform display name (read-only)
-            'contest_id',       # Keep contest_id (conditionally required)
-            'problem_index',    # Keep problem_index (required)
+            'platform',         
+            'platform_display', 
+            'contest_id',       
+            'problem_index',    
             'title', 'link', 'tags', 'rating', 'points',
         )
         read_only_fields = (
@@ -231,15 +217,13 @@ class QuestionSerializer(serializers.ModelSerializer):
             'title', 'link', 'tags', 'rating' # Metadata and links are fetched/generated
         )
         extra_kwargs = {
-            # Although model has blank=True, explicitly state it's not always required here
             'contest_id': {'required': False, 'allow_null': True},
-            # Points should be writable on creation/update
-            'points': {'required': False} # Use model default if not provided
+            'points': {'required': False} 
         }
 
     def validate(self, data):
         """Ensure contest_id is provided if and only if platform is codeforces."""
-        platform = data.get('platform', getattr(self.instance, 'platform', None)) # Get platform from input or instance
+        platform = data.get('platform', getattr(self.instance, 'platform', None)) 
         contest_id = data.get('contest_id', getattr(self.instance, 'contest_id', None))
 
         if platform == 'codeforces':
@@ -247,30 +231,22 @@ class QuestionSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'contest_id': 'Contest ID is required for Codeforces questions.'})
         elif platform == 'codechef':
             if contest_id is not None:
-                # You could raise an error, or just silently ignore/remove it before saving
-                # Raising an error is clearer for the API user.
                 raise serializers.ValidationError({'contest_id': 'Contest ID must be blank (null) for CodeChef questions.'})
-                # Or silently remove: data['contest_id'] = None
-        # Add validation for other platforms if needed
 
-        # Ensure problem_index is always provided (model field doesn't have blank=True)
         if not data.get('problem_index', getattr(self.instance, 'problem_index', None)):
              raise serializers.ValidationError({'problem_index': 'Problem Index/Code is required.'})
 
 
         return data
 
-# serializers.py (in your app, e.g., 'assessments/serializers.py')
-
 class MentorAssignmentListSerializer(serializers.ModelSerializer):
     """
     Serializer for listing assignments created by a mentor, including
     submission progress counts.
     """
-    # Use SerializerMethodField to calculate counts dynamically
     total_assigned_students = serializers.SerializerMethodField()
     submitted_students_count = serializers.SerializerMethodField()
-    deadline = serializers.DateTimeField(format="%Y-%m-%d %H:%M", read_only=True) # Format deadline
+    deadline = serializers.DateTimeField(format="%Y-%m-%d %H:%M", read_only=True) 
 
     class Meta:
         model = Assessment
@@ -281,11 +257,10 @@ class MentorAssignmentListSerializer(serializers.ModelSerializer):
             'deadline',
             'created_at',
             'preferred_criteria',
-            'total_assigned_students', # Added field
-            'submitted_students_count', # Added field
-            # Add other fields you want in the list view
+            'total_assigned_students', 
+            'submitted_students_count', 
         ]
-        read_only_fields = fields # Make all fields read-only for this list view
+        read_only_fields = fields 
 
     def get_total_assigned_students(self, obj):
         """
@@ -294,8 +269,7 @@ class MentorAssignmentListSerializer(serializers.ModelSerializer):
         """
         # Check if 'assigned_students' was prefetched
         if hasattr(obj, 'assigned_students_count_annotation'):
-             return obj.assigned_students_count_annotation # Use annotated value
-        # Fallback if not annotated (less efficient)
+             return obj.assigned_students_count_annotation 
         return obj.assigned_students.count()
 
 
@@ -304,9 +278,8 @@ class MentorAssignmentListSerializer(serializers.ModelSerializer):
         Returns the count of unique students who have at least one 'OK'
         submission for this assessment. Uses prefetched data if available.
         """
-         # Check if 'successful_submission_students_count_annotation' was prefetched/annotated
         if hasattr(obj, 'successful_submission_students_count_annotation'):
-            return obj.successful_submission_students_count_annotation # Use annotated value
+            return obj.successful_submission_students_count_annotation 
 
         # Fallback if not annotated (less efficient)
         # Count distinct students who have a submission for this assessment
@@ -319,7 +292,7 @@ class MentorAssignmentListSerializer(serializers.ModelSerializer):
 
 class AssessmentSubmissionSerializer(serializers.ModelSerializer):
     student = BasicUserSerializer(read_only=True)
-    question_display = serializers.SerializerMethodField() # Combine contest/index/title
+    question_display = serializers.SerializerMethodField() 
     assessment_title = serializers.CharField(source='assessment.title', read_only=True)
 
     class Meta:
@@ -331,7 +304,7 @@ class AssessmentSubmissionSerializer(serializers.ModelSerializer):
             'codeforces_passed_test_count', 'codeforces_time_consumed_millis',
             'codeforces_memory_consumed_bytes', 'solved_at', 'last_checked_at'
         )
-        read_only_fields = ( # Most fields are updated by the backend scheduler
+        read_only_fields = ( 
             'id', 'student', 'question', 'question_display', 'assessment', 'assessment_title',
             'status', 'evaluation_score', 'evaluation_feedback',
             'codeforces_verdict', 'codeforces_submission_id', 'plagiarism_score',
@@ -363,7 +336,6 @@ class AssessmentListSerializer(serializers.ModelSerializer):
 class AssessmentDetailSerializer(serializers.ModelSerializer):
     """Serializer for viewing/editing a single assessment"""
     mentor = BasicUserSerializer(read_only=True)
-    # Use the updated QuestionSerializer
     questions = QuestionSerializer(many=True, read_only=True)
     assigned_students = BasicUserSerializer(many=True, read_only=True)
     assigned_student_ids = serializers.PrimaryKeyRelatedField(
@@ -382,18 +354,15 @@ class AssessmentDetailSerializer(serializers.ModelSerializer):
 
     def validate_deadline(self, value):
         """Ensure deadline is in the future for new assessments or updates."""
-        # Allow updating other fields even if deadline is past, but not setting a past deadline.
         if value <= timezone.now():
-             # Check if it's an update and the deadline hasn't changed or is already past
              if self.instance and self.instance.deadline and value == self.instance.deadline:
-                 pass # Allow saving if deadline wasn't the field being changed
+                 pass 
              elif self.instance and self.instance.is_past_deadline and value < self.instance.deadline:
                  raise serializers.ValidationError("Cannot set deadline further in the past.")
              elif not (self.instance and self.instance.is_past_deadline): # Prevent setting past deadline on create or future->past update
                  raise serializers.ValidationError("Deadline must be set in the future.")
         return value
 
-# --- Serializer for the Scheduler Update ---
 class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
     """Serializer used by the scheduler endpoint to update submission status. Enforces CodeChef only."""
     student_id = serializers.IntegerField()
@@ -412,20 +381,18 @@ class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
     codeforces_time_consumed_millis = serializers.IntegerField(allow_null=True, required=False)
     codeforces_memory_consumed_bytes = serializers.IntegerField(allow_null=True, required=False)
 
-    # --- NEW Fields ---
+    # Submission and Plagirism
     submitted_code = serializers.CharField(allow_null=True, required=False, allow_blank=True, style={'base_template': 'textarea.html'})
-    plagiarism_score = serializers.IntegerField(allow_null=True, required=False) # Match model type (IntegerField/FloatField)
+    plagiarism_score = serializers.IntegerField(allow_null=True, required=False) 
 
     def validate(self, data):
-        # You could add validation here, e.g., check plagiarism_score range if needed
         score = data.get('plagiarism_score')
-        if score is not None and (score < 0 or score > 100): # Example range check
+        if score is not None and (score < 0 or score > 100): 
              raise serializers.ValidationError({'plagiarism_score': 'Score must be between 0 and 100.'})
         return data
 
     def create(self, validated_data):
         """Handles creation of submission status, enforcing CodeChef platform."""
-        # ... (existing logic to fetch student, question, assessment and validate platform/assignment) ...
         try:
             student = User.objects.get(pk=validated_data['student_id'], role='student')
             question = Question.objects.get(pk=validated_data['question_id'])
@@ -465,10 +432,9 @@ class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
                 'codeforces_passed_test_count': validated_data.get('codeforces_passed_test_count'),
                 'codeforces_time_consumed_millis': validated_data.get('codeforces_time_consumed_millis'),
                 'codeforces_memory_consumed_bytes': validated_data.get('codeforces_memory_consumed_bytes'),
-                # Add new fields to defaults
                 'submitted_code': validated_data.get('submitted_code'),
                 'plagiarism_score': validated_data.get('plagiarism_score'),
-                # last_checked_at and solved_at handled in save()
+                
             }
         )
         return submission
@@ -483,10 +449,8 @@ class SchedulerSubmissionUpdateSerializer(serializers.Serializer):
         instance.codeforces_passed_test_count = validated_data.get('codeforces_passed_test_count', instance.codeforces_passed_test_count)
         instance.codeforces_time_consumed_millis = validated_data.get('codeforces_time_consumed_millis', instance.codeforces_time_consumed_millis)
         instance.codeforces_memory_consumed_bytes = validated_data.get('codeforces_memory_consumed_bytes', instance.codeforces_memory_consumed_bytes)
-
-        # Update new fields
         instance.submitted_code = validated_data.get('submitted_code', instance.submitted_code)
         instance.plagiarism_score = validated_data.get('plagiarism_score', instance.plagiarism_score)
 
-        instance.save() # Model's save() method runs validation again
+        instance.save() 
         return instance

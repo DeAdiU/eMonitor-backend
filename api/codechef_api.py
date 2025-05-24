@@ -23,9 +23,19 @@ class CodechefAPI:
         return { "country_rank": self.data["countryRank"], "global_rank": self.data["globalRank"] }
     
     def get_stars(self):
+        
         return self.data["stars"]
     
     def get_submissions_monthly(self):
+        
+        """
+        Generates monthly submission counts based on user's heatmap data.
+
+        Maps to LeetCode's get_recent_submissions.
+
+        Returns:
+            A dictionary mapping month keys (YYYY-MM) to the number of submissions in that month.
+        """
         heatmap_data_list = self.data["heatMap"]
         monthly_counts = defaultdict(int)
         if not isinstance(heatmap_data_list, list):
@@ -46,12 +56,18 @@ class CodechefAPI:
                 print(f"Warning: Skipping invalid heatmap entry: {entry}. Error: {e}")
                 continue
 
-        # Sort the dictionary by keys (months) before returning
-        # Use OrderedDict to maintain insertion order after sorting keys
         sorted_monthly_counts = collections.OrderedDict(sorted(monthly_counts.items()))
         return dict(sorted_monthly_counts)
 
     def get_submissions_weekly(self):
+        """
+        Generates weekly submission counts based on user's heatmap data.
+
+        Maps to LeetCode's get_recent_submissions.
+
+        Returns:
+            A dictionary mapping week keys (YYYY-Www) to the number of submissions in that week.
+        """
         heatmap_data_list = self.data["heatMap"]
         weekly_counts = defaultdict(int)
         if not isinstance(heatmap_data_list, list):
@@ -79,6 +95,17 @@ class CodechefAPI:
         return dict(sorted_weekly_counts)
     
     def get_ratings_graph(self):
+        """
+        Processes the rating data and returns a list of dictionaries containing
+        the date and rating, sorted by date.
+
+        Maps to LeetCode's get_user_rating_history.
+
+        Returns:
+            A list of dictionaries with the following keys:
+                - date: A string representing the date in the format 'YYYY-MM-DD'.
+                - rating: An integer representing the rating.
+        """
         rating_data_list = self.data["ratingData"]
         processed_ratings = []
         if not isinstance(rating_data_list, list):

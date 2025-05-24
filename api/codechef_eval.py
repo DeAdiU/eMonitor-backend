@@ -1,15 +1,12 @@
-# codechef_scraper.py
-
 import time
 import logging
-import pandas as pd # Keep import if get_table_data uses it internally (though snippet doesn't)
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
 logger = logging.getLogger(__name__)
 
-# --- Helper: Parsing Functions (Keep as before) ---
 def parse_time_to_millis(time_str):
     if not time_str: return None
     try:
@@ -27,28 +24,21 @@ def parse_memory_to_bytes(memory_str):
     except: pass
     return None
 
-# --- User's Provided Functions (Copied Directly) ---
-
 def setup_webdriver():
     """Initialize and configure Chrome WebDriver with headless options"""
-    # This function now handles driver setup internally
-    # It relies on chromedriver being in the PATH or Selenium finding it
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu') # Add GPU disable often needed for headless
+    chrome_options.add_argument('--disable-gpu')
     logger.info("Setting up new WebDriver instance...")
     try:
-        # Selenium 4+ attempts to find driver automatically if service not specified
-        # This WILL FAIL if chromedriver is not in PATH and webdriver-manager not used implicitly
         wd = webdriver.Chrome(options=chrome_options)
-        wd.implicitly_wait(5) # Add implicit wait
+        wd.implicitly_wait(5) 
         logger.info("WebDriver instance created.")
         return wd
     except WebDriverException as e:
         logger.error(f"Failed to setup WebDriver (driver likely not found in PATH): {e}", exc_info=True)
-        # Raise a specific error that the calling function can catch
         raise ConnectionError(f"Could not start WebDriver (check chromedriver in PATH): {e}")
     except Exception as e:
          logger.error(f"Unexpected error during WebDriver setup: {e}", exc_info=True)
@@ -57,23 +47,19 @@ def setup_webdriver():
 
 def get_table_data(username):
     """Extract table data including headers and rows with links for a given username"""
-    # This function now creates and quits its own driver
-    wd = None # Initialize wd to None
+    wd = None 
     try:
-        wd = setup_webdriver() # Creates its own driver
+        wd = setup_webdriver() 
         profile_url = f"https://www.codechef.com/users/{username}"
         logger.info(f"Getting table data from: {profile_url}")
         wd.get(profile_url)
-        # Find the table
-        table = wd.find_element(By.TAG_NAME, "table") # Use By.TAG_NAME
+        table = wd.find_element(By.TAG_NAME, "table")
 
-        # Extract headers
         headers = [header.text for header in table.find_elements(By.TAG_NAME, "th")]
         headers.append("Solution Link")
 
-        # Extract rows
         data = []
-        rows = table.find_elements(By.TAG_NAME, "tr")[1:]  # Skip header row
+        rows = table.find_elements(By.TAG_NAME, "tr")[1:] 
 
         for row in rows:
             cols = row.find_elements(By.TAG_NAME, "td")
@@ -94,7 +80,7 @@ def get_table_data(username):
     except NoSuchElementException:
         logger.error(f"Could not find the submission table element ('table' tag) for {username}.")
         return None, None
-    except ConnectionError: # Catch error from setup_webdriver
+    except ConnectionError:
          logger.error(f"Failed to setup WebDriver within get_table_data for {username}.")
          return None, None
     except Exception as e:
@@ -106,8 +92,6 @@ def get_table_data(username):
             wd.quit()
 
 
-# --- Solution Detail Page Scraping (Still needed, uses its own driver) ---
-
 def _scrape_solution_details_page(solution_link: str):
     """
     Scrapes details from the individual solution page: Code, Passed Tests, Time, Memory.
@@ -117,17 +101,15 @@ def _scrape_solution_details_page(solution_link: str):
         logger.warning("Scraper received no solution link for details page.")
         return {}
 
-    wd = None # Initialize wd to None
+    wd = None 
     logger.info(f"Attempting to scrape solution detail page: {solution_link}")
     try:
-        wd = setup_webdriver() # Creates its own driver
+        wd = setup_webdriver() 
         wd.get(solution_link)
         logger.info("Navigated to solution detail page.")
-        # time.sleep(3) # Implicit wait is set in setup_webdriver
 
         details = {}
 
-        # Scrape Code
         try:
             code_element = wd.find_element(By.CLASS_NAME, "ace_content")
             details["code"] = code_element.text
@@ -139,16 +121,15 @@ def _scrape_solution_details_page(solution_link: str):
             logger.error(f"Scraper unexpected error scraping code: {e}", exc_info=True)
             details["code"] = None
 
-        # Scrape Detailed Test Case Table
         passed_count = 0
         try:
-            table = wd.find_element(By.TAG_NAME, "table") # Find *first* table
+            table = wd.find_element(By.TAG_NAME, "table") 
             rows = table.find_elements(By.TAG_NAME, "tr")[1:]
             for row in rows:
                 cols = row.find_elements(By.TAG_NAME, "td")
                 if not cols: continue
                 try:
-                    test_verdict = cols[2].text.strip() # Assumes verdict is in second column
+                    test_verdict = cols[2].text.strip() 
                     if "AC" in test_verdict.upper() or "CORRECT" in test_verdict.upper():
                         passed_count += 1
                 except IndexError: pass
@@ -161,7 +142,6 @@ def _scrape_solution_details_page(solution_link: str):
             logger.error(f"Scraper unexpected error scraping results table: {e}", exc_info=True)
             details["passed_tests"] = None
 
-        # Scrape Time and Memory
         try:
             memory_time_element = wd.find_element(By.CLASS_NAME, "_scoreTimeMem__container_1xnpw_344") # Fragile selector
             memory_time_text = memory_time_element.text
@@ -184,19 +164,18 @@ def _scrape_solution_details_page(solution_link: str):
 
         return details
 
-    except ConnectionError: # Catch error from setup_webdriver
+    except ConnectionError: 
          logger.error(f"Failed to setup WebDriver within _scrape_solution_details_page.")
-         return {} # Return empty dict on setup failure
+         return {} 
     except Exception as e:
         logger.error(f"Unexpected error scraping solution page {solution_link}: {e}", exc_info=True)
-        return {} # Return empty dict on other errors
+        return {}
     finally:
         if wd:
             logger.info("Quitting WebDriver instance from _scrape_solution_details_page.")
             wd.quit()
 
 
-# --- Main Public Function ---
 def scrape_codechef_submission(codechef_handle: str, problem_code: str) -> dict:
     """
     Orchestrates the scraping process using user's provided functions structure.
@@ -214,51 +193,40 @@ def scrape_codechef_submission(codechef_handle: str, problem_code: str) -> dict:
     """
     logger.warning("Executing scrape_codechef_submission using multi-driver approach (inefficient).")
     try:
-        # --- Step 1: Get submission table data (uses its own driver) ---
         headers, table_data = get_table_data(codechef_handle)
 
         if headers is None or table_data is None:
             logger.warning(f"Could not extract submission table data for user {codechef_handle}.")
-            return {} # Return empty if table data couldn't be fetched
+            return {} 
 
-        # --- Step 2: Find the relevant submission row ---
-        # ASSUMPTION: Problem code is in the 3rd column (index 2)
-        # ASSUMPTION: Table is ordered newest first
-        PROBLEM_CODE_COLUMN_INDEX = 1 # Adjust if necessary!
+        PROBLEM_CODE_COLUMN_INDEX = 1 
         latest_matching_row = None
         
         latest_matching_row = table_data[0]
 
         if not latest_matching_row:
             logger.warning(f"No submission found for problem {problem_code} in the table for user {codechef_handle}.")
-            return {} # Return empty if no matching submission found
-
-        # --- Step 3: Extract basic info from the found row ---
-        # Mapping based on assumed indices
-        # 0: ID, 1: Time, 2: Problem Code, 3: Result, 4: Lang, 5: Link
+            return {} 
         try:
             submission_id = latest_matching_row[-1].split("/")[-1] if len(latest_matching_row) > 0 else None
             verdict = latest_matching_row[2].strip() if len(latest_matching_row) > 3 else None
             language = latest_matching_row[3].strip() if len(latest_matching_row) > 4 else None
-            solution_link = latest_matching_row[-1] # Link is always last
+            solution_link = latest_matching_row[-1]
 
             if verdict=="(100)":
                 verdict="OK"
         except IndexError:
             logger.error("IndexError accessing data in the found submission row. Table structure might have changed.")
-            return {} # Cannot proceed without basic info
+            return {}
 
         logger.info(f"Found matching submission in table: ID={submission_id}, Verdict={verdict}, Lang={language}, Link={solution_link}")
 
-        # --- Step 4: Scrape details from the solution page (uses its own driver) ---
         details = {}
         if solution_link:
-            # This call will create *another* WebDriver instance
             details = _scrape_solution_details_page(solution_link)
         else:
             logger.warning("No solution link found in table row, cannot scrape details (code, tests, etc.).")
 
-        # --- Step 5: Combine results ---
         result_data = {
             'codeforces_submission_id': int(submission_id) if submission_id else None,
             'verdict': verdict,
@@ -271,10 +239,9 @@ def scrape_codechef_submission(codechef_handle: str, problem_code: str) -> dict:
         logger.info("Scraping process completed.")
         return result_data
 
-    except ConnectionError as e: # Catch errors from setup_webdriver calls
+    except ConnectionError as e: 
         logger.error(f"Scraping failed due to WebDriver setup error: {e}")
-        raise # Re-raise critical setup errors
-    except Exception as e: # Catch unexpected errors during the flow
+        raise 
+    except Exception as e: 
          logger.error(f"Unexpected error during scraping orchestration: {e}", exc_info=True)
-         # Decide if this should be a ConnectionError or a different custom exception
          raise ConnectionError(f"Unexpected scraping error: {e}")

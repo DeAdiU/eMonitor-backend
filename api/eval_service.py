@@ -29,7 +29,7 @@ def evaluate_submission(submission: AssessmentSubmission, assessment: Assessment
     # Prepare details dict for evaluation function, mimicking Codeforces structure where helpful
     eval_details = {
         "id": submission.codeforces_submission_id,
-        "contestId": submission.question.contest_id, # Include contest ID if available
+        "contestId": submission.question.contest_id,
         "problem": {
             "contestId": submission.question.contest_id,
             "index": submission.question.problem_index,
@@ -38,27 +38,23 @@ def evaluate_submission(submission: AssessmentSubmission, assessment: Assessment
             "tags": submission.question.tags.split(',') if submission.question.tags else []
         },
         "author": {"members": [{"handle": submission.student.username}]},
-        "programmingLanguage": getattr(submission, 'language', 'Unknown'), # Use getattr
-        "verdict": submission.verdict or 'UNKNOWN', # Handle None verdict
+        "programmingLanguage": getattr(submission, 'language', 'Unknown'),
+        "verdict": submission.verdict or 'UNKNOWN', 
         "passedTestCount": submission.passed_test_count if submission.passed_test_count is not None else 0,
         "timeConsumedMillis": submission.time_consumed_millis,
         "memoryConsumedBytes": submission.memory_consumed_bytes,
         "plagiarismVerdict": submission.plagiarism_score or 'UNKNOWN',
-        # Add submitted_code if your prompt/model uses it (but the provided one doesn't)
         # "sourceCode": submission.submitted_code
     }
 
     preferred_criteria = assessment.preferred_criteria or "Focus on correctness (AC verdict) and efficiency (low time/memory). Prefer C++ or Python or Java."
 
     if EVALUATION_AVAILABLE:
-         # Use Gemini or fallback via the imported function
          evaluation_result = evaluate_submission_with_gemini(eval_details, preferred_criteria)
     else:
-         # Use only fallback if module failed to import
          logger.warning("Evaluation module unavailable, using fallback directly.")
          evaluation_result = evaluate_submission_fallback(eval_details, preferred_criteria)
 
-    # Ensure score and feedback keys exist
     score = evaluation_result.get('score', 0.0)
     feedback = evaluation_result.get('feedback', 'Evaluation failed to produce feedback.')
 

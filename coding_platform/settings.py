@@ -60,11 +60,10 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=60),
 }
 
-# Replace 'api' with the name of your app if it's different
 AUTH_USER_MODEL = 'api.User'
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Example frontend URL,
+    "http://localhost:3000",  
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
@@ -159,9 +158,6 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# settings.py
-
-
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
@@ -175,9 +171,7 @@ FRONTEND_URL = 'http://127.0.0.1:8000/api'
 GOOGLE_API_KEY = "AIzaSyAYjACuvYcuU_hAa0jI_VHhgX7uiGEcV3E"
 
 
-ALLOWED_HOSTS = ['*']  # or use your Railway domain later
-
-# Static files (important!)
+ALLOWED_HOSTS = ['*']  
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATIC_URL = '/static/'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

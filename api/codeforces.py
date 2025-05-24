@@ -21,7 +21,7 @@ try:
         raise ValueError("GOOGLE_API_KEY environment variable not set.")
     genai.configure(api_key=GOOGLE_API_KEY)
     GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
-    # print("Gemini API configured successfully.") # Removed print
+    # print("Gemini API configured successfully.") 
 except Exception as e:
     print(f"Error configuring Gemini API: {e}")
     print("AI Evaluation will use fallback logic.")
@@ -61,17 +61,17 @@ def evaluate_submission_with_gemini(
     preferred_criteria_str: str
 ) -> Dict[str, Any]:
     # print("\n" + "-" * 20) # Removed print
-    # print(f"Attempting AI Evaluation using Gemini:") # Removed print
-    # print(f"  Submission ID: {submission_details.get('id')}") # Removed print
+    # print(f"Attempting AI Evaluation using Gemini:") 
+    # print(f"  Submission ID: {submission_details.get('id')}") 
 
     if not GEMINI_MODEL:
-        print("  Gemini API not available. Using fallback evaluation.") # Removed print
+        print("  Gemini API not available. Using fallback evaluation.")
         return evaluate_submission_fallback(submission_details, preferred_criteria_str)
 
     try:
         submission_details_json = json.dumps(submission_details, indent=2)
     except Exception as e:
-        print(f"  Error converting submission details to JSON: {e}. Using basic info.") # Removed print
+        print(f"  Error converting submission details to JSON: {e}. Using basic info.") 
         submission_details_json = json.dumps({
             "id": submission_details.get("id"),
             "contestId": submission_details.get("contestId"),
@@ -177,33 +177,33 @@ Now, evaluate the provided submission based only on the metadata (including plag
                 score = float(result["score"])
                 result["score"] = max(0.0, min(100.0, score))
             except (ValueError, TypeError):
-                print("  Warning: Gemini returned non-numeric score. Using fallback.") # Removed print
+                print("  Warning: Gemini returned non-numeric score. Using fallback.") 
                 return evaluate_submission_fallback(submission_details, preferred_criteria_str)
 
-            print(f"  Gemini Evaluation Result: Score={result['score']:.2f}") # Removed print
+            print(f"  Gemini Evaluation Result: Score={result['score']:.2f}") 
             print("-" * 20) # Removed print
             result["full_submission_details"] = submission_details
             return result
         else:
-            # print("  Warning: Gemini response did not match expected JSON format. Using fallback.") # Removed print
-            # print(f"  Received: {cleaned_response_text}") # Removed print
+            # print("  Warning: Gemini response did not match expected JSON format. Using fallback.") 
+            # print(f"  Received: {cleaned_response_text}")
             return evaluate_submission_fallback(submission_details, preferred_criteria_str)
 
     except json.JSONDecodeError as e:
-        print(f"  Error: Failed to decode JSON response from Gemini: {e}") # Removed print
-        print(f"  Received text: {response.text if 'response' in locals() else 'N/A'}") # Removed print
-        print("  Using fallback evaluation.") # Removed print
+        print(f"  Error: Failed to decode JSON response from Gemini: {e}") 
+        print(f"  Received text: {response.text if 'response' in locals() else 'N/A'}") 
+        print("  Using fallback evaluation.") 
         return evaluate_submission_fallback(submission_details, preferred_criteria_str)
     except Exception as e:
-        # print(f"  An error occurred during Gemini API call: {e}") # Removed print
-        # print("  Using fallback evaluation.") # Removed print
+        # print(f"  An error occurred during Gemini API call: {e}") 
+        # print("  Using fallback evaluation.") 
         return evaluate_submission_fallback(submission_details, preferred_criteria_str)
 
 def evaluate_submission_fallback(
 submission_details: Dict[str, Any],
 preferred_criteria_str: str
 ) -> Dict[str, Any]:
-# print(" Executing Fallback Evaluation Logic...") # Removed print
+# print(" Executing Fallback Evaluation Logic...") 
     score = 0.0
     feedback_lines = [f"Fallback evaluation for submission {submission_details.get('id')}:"]
     verdict = submission_details.get("verdict", "UNKNOWN")
@@ -261,8 +261,8 @@ preferred_criteria_str: str
     feedback_lines.append(f"----> Fallback Score: {score:.2f}")
     feedback = "\n".join(feedback_lines)
 
-    print(f"  Fallback Evaluation Result: Score={score:.2f}") # Removed print
-    print("-" * 20) # Removed print
+    print(f"  Fallback Evaluation Result: Score={score:.2f}") 
+    print("-" * 20) 
 
     return {"score": score, "feedback": feedback, "full_submission_details": submission_details}
 
@@ -275,7 +275,7 @@ end_time_unix: int,
 preferred_criteria_str: str
 ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
     print(f"\nChecking & evaluating submissions incrementally for user '{handle}', problem {contest_id}{problem_index}...") # Removed print
-# print(f"Preference criteria: '{preferred_criteria_str}'") # Removed print
+# print(f"Preference criteria: '{preferred_criteria_str}'") 
     current_from_index = 1
     checked_count = 0
 
@@ -289,7 +289,7 @@ preferred_criteria_str: str
             submissions_batch = _make_api_request("user.status", params)
 
             if not submissions_batch:
-                print(f"  Checked {checked_count} submissions. No more submissions found for user.") # Removed print
+                print(f"  Checked {checked_count} submissions. No more submissions found for user.") 
                 break
 
             checked_count += len(submissions_batch)
@@ -299,7 +299,7 @@ preferred_criteria_str: str
 
                 if submission_time and submission_time < start_time_unix:
                     print(f"  Reached submission {sub.get('id')} older than start time ({datetime.fromtimestamp(start_time_unix, tz=timezone.utc)}). Stopping search.") # Removed print
-                    print(f"  Checked {checked_count} submissions in total.") # Removed print
+                    print(f"  Checked {checked_count} submissions in total.") 
                     return None
 
                 is_correct_problem = (
@@ -315,17 +315,17 @@ preferred_criteria_str: str
                 )
                 if not is_within_timeframe:
                     continue
-                print(f"\n  >>> Found target submission! <<<") # Removed print
-                print(f"  Checked {checked_count} submissions in total.") # Removed print
-                print(f"  Submission ID: {sub.get('id')}, Verdict: {sub.get('verdict')}") # Removed print
-                print(f"  Submission Time (UTC): {datetime.fromtimestamp(submission_time, tz=timezone.utc)}") # Removed print
-                print("  Proceeding to AI Evaluation...") # Removed print
+                print(f"\n  >>> Found target submission! <<<") 
+                print(f"  Checked {checked_count} submissions in total.") 
+                print(f"  Submission ID: {sub.get('id')}, Verdict: {sub.get('verdict')}") 
+                print(f"  Submission Time (UTC): {datetime.fromtimestamp(submission_time, tz=timezone.utc)}") 
+                print("  Proceeding to AI Evaluation...") 
                 evaluation_result = evaluate_submission_with_gemini(sub, preferred_criteria_str)
                 return sub, evaluation_result
 
             current_from_index += SUBMISSION_BATCH_SIZE
 
-        # print(f"  No submission found matching criteria for problem {contest_id}{problem_index} within the timeframe.") # Removed print
+        # print(f"  No submission found matching criteria for problem {contest_id}{problem_index} within the timeframe.") 
         return None
 
     except (requests.exceptions.RequestException, ValueError) as e:
@@ -339,7 +339,7 @@ def find_problems_by_criteria(
     tags_str: Optional[str] = None,
     min_rating: Optional[int] = None,
     max_rating: Optional[int] = None,
-    n: Optional[int] = None # <-- Add parameter for number of questions
+    n: Optional[int] = None 
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Fetches problems from Codeforces API based on tags and rating range,
@@ -394,11 +394,8 @@ def find_problems_by_criteria(
 
         print(f"  Found {len(problems)} problems initially, {len(filtered_problems)} after rating filter.")
 
-        # Limit the number of results if 'n' is provided
         if n is not None and n > 0:
-            # Optional: Randomize before limiting if desired
-            # random.shuffle(filtered_problems)
-            limited_problems = filtered_problems[:n] # Take the first 'n' problems
+            limited_problems = filtered_problems[:n] 
             print(f"  Limiting results to {len(limited_problems)} based on request for {n}.")
             return limited_problems
         else:
@@ -437,14 +434,7 @@ def fetch_problem_metadata_cf(contest_id: int, problem_index: str) -> dict | Non
     logger.info(f"Attempting to fetch metadata for Codeforces problem {contest_id}{problem_index}")
 
     try:
-        # --- Inefficient Approach: Fetch all problems ---
-        # This is necessary because CF API doesn't seem to have a direct
-        # endpoint for fetching a single problem's details by ID/index.
-        # The _make_api_request should handle delays.
-        # No 'params' needed here, as we want all problems for local filtering.
         problemset_data = _make_api_request("problemset.problems")
-
-        # Validate the response structure
         if not isinstance(problemset_data, dict) or "problems" not in problemset_data:
             logger.error(f"Invalid or unexpected response structure received from problemset.problems API. "
                          f"Expected dict with 'problems' key, got: {type(problemset_data)}")
@@ -455,34 +445,30 @@ def fetch_problem_metadata_cf(contest_id: int, problem_index: str) -> dict | Non
              logger.error(f"Invalid 'problems' data type in response. Expected list, got: {type(problems)}")
              return None
 
-        # --- Filter Locally ---
         found_problem = None
         for problem in problems:
             if not isinstance(problem, dict):
                 logger.warning(f"Skipping invalid item in problems list (not a dict): {problem}")
                 continue
 
-            # Get IDs safely, checking types
             p_contest_id = problem.get("contestId")
             p_index = problem.get("index")
 
             if isinstance(p_contest_id, int) and isinstance(p_index, str) and \
                p_contest_id == contest_id and p_index == problem_index:
                 found_problem = problem
-                break # Found the specific problem
+                break 
 
-        # --- Process Found Problem ---
         if found_problem:
             title = found_problem.get("name")
             tags_list = found_problem.get("tags", [])
             rating = found_problem.get("rating")
 
-            # Format tags list into a comma-separated string
-            tags_str = ", ".join(str(tag) for tag in tags_list if tag) # Ensure tags are strings
+            tags_str = ", ".join(str(tag) for tag in tags_list if tag) 
 
             metadata = {
                 "title": title if isinstance(title, str) else None,
-                "tags": tags_str, # Will be empty string if tags_list is empty
+                "tags": tags_str, 
                 "rating": rating if isinstance(rating, int) else None,
             }
             logger.info(f"Successfully found metadata for {contest_id}{problem_index}: "
@@ -491,15 +477,14 @@ def fetch_problem_metadata_cf(contest_id: int, problem_index: str) -> dict | Non
         else:
             # If loop completes without finding the problem
             logger.warning(f"Problem {contest_id}{problem_index} not found in the fetched problem set.")
-            return None # Problem not found in the list
+            return None 
 
     except requests.exceptions.RequestException as e:
          logger.error(f"Network error fetching metadata for {contest_id}{problem_index}: {e}", exc_info=True)
          return None
-    except ValueError as e: # Catch potential errors from _make_api_request (e.g., JSON decode, API status)
+    except ValueError as e: 
          logger.error(f"API or data processing error for {contest_id}{problem_index}: {e}", exc_info=True)
          return None
     except Exception as e:
-        # Catch any other unexpected errors during processing
         logger.error(f"Unexpected error fetching metadata for {contest_id}{problem_index}: {e}", exc_info=True)
         return None
